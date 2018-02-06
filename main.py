@@ -99,7 +99,7 @@ def decode_and_crop(annot):
     labels = tf.map_fn(make_labels, parts, back_prop=False, dtype=tf.float32)
 
     result = annot.copy()
-    result["input"] = tf.Print(image_cropped, [annot["image"]])
+    result["input"] = image_cropped
     result["labels"] = labels
     return result
 
@@ -227,12 +227,11 @@ model = tf.estimator.Estimator(model_fn)
 
 
 def train_input_fn():
-    import multiprocessing
-
     dataset = train_annots["dataset"] \
-        .map(decode_and_crop, num_parallel_calls=int(multiprocessing.cpu_count()/2)) \
+        .map(decode_and_crop, num_parallel_calls=8) \
         .prefetch(32) \
         .batch(4) \
+        .repeat()
 
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
@@ -242,4 +241,4 @@ def train_input_fn():
 
 for epoch in range(100):
     print("epoch ", epoch)
-    model.train(train_input_fn, steps=4000)
+    model.train(train_input_fn, steps=4000, hooks=[tf.train.StepCounterHook()])
