@@ -227,10 +227,12 @@ model = tf.estimator.Estimator(model_fn)
 
 
 def train_input_fn():
+    import multiprocessing
+
     dataset = train_annots["dataset"] \
-        .map(decode_and_crop, num_parallel_calls=8) \
-        .prefetch(4) \
-        .batch(4)
+        .map(decode_and_crop, num_parallel_calls=int(multiprocessing.cpu_count()/2)) \
+        .prefetch(32) \
+        .batch(4) \
 
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
@@ -238,5 +240,6 @@ def train_input_fn():
     multichannel = tf.transpose(data["labels"], perm=[0, 2, 3, 1])
     return data["input"], multichannel
 
-
-model.train(train_input_fn, steps=10)
+for epoch in range(100):
+    print("epoch ", epoch)
+    model.train(train_input_fn, steps=4000)
