@@ -6,7 +6,7 @@ from stacked_hourglass.opts import opts
 
 config = tf.ConfigProto()
 config.gpu_options.allow_growth=True
-sess = tf.InteractiveSession(config=config)
+sess = tf.Session(config=config)
 
 def load_annots(label):
     names_filename = path.join(opts.data_dir, "pascal3d", "annot",
