@@ -4,9 +4,11 @@ import h5py
 import tensorflow as tf
 from stacked_hourglass.opts import opts
 
-sess = tf.InteractiveSession()
+config = tf.ConfigProto()
+config.gpu_options.allow_growth=True
+sess = tf.InteractiveSession(config=config)
 
-def load_annots(label: str):
+def load_annots(label):
     names_filename = path.join(opts.data_dir, "pascal3d", "annot",
                                "{}_images.txt".format(label))
 
@@ -96,11 +98,10 @@ def decode_and_crop(annot):
 
     labels = tf.map_fn(make_labels, parts, back_prop=False, dtype=tf.float32)
 
-    return {
-        **annot,
-        "input": tf.Print(image_cropped, [annot["image"]]),
-        "labels": labels,
-    }
+    result = annot.copy()
+    result["input"] = tf.Print(image_cropped, [annot["image"]])
+    result["labels"] = labels
+    return result
 
 
 def conv_block(x, num_out):
