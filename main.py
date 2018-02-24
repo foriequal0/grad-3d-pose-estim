@@ -4,9 +4,11 @@ import h5py
 import tensorflow as tf
 from stacked_hourglass.opts import opts
 
+tf.logging.set_verbosity(tf.logging.INFO)
 config = tf.ConfigProto()
-config.gpu_options.allow_growth=True
+config.gpu_options.allow_growth = True
 sess = tf.Session(config=config)
+
 
 def load_annots(label):
     names_filename = path.join(opts.data_dir, "pascal3d", "annot",
@@ -93,7 +95,7 @@ def decode_and_crop(annot):
     def make_labels(part):
         return tf.cond(
             tf.greater(part[1], 0),
-            true_fn=lambda: draw_gaussian(part + 1.0, center, scale, 1.75),
+            true_fn=lambda: draw_gaussian(part, center, scale, 1.75),
             false_fn=lambda: tf.zeros([64, 64], tf.float32))
 
     labels = tf.map_fn(make_labels, parts, back_prop=False, dtype=tf.float32)
@@ -161,7 +163,7 @@ def lin(x, num_out):
     return x
 
 
-def stacked_hourglass(x, refs):
+def stacked_hourglass(x, nparts):
     # preprocess
     conv1 = tf.layers.conv2d(x, 64, kernel_size=[7, 7], strides=[2, 2], padding='SAME')  # 128
 
@@ -183,7 +185,7 @@ def stacked_hourglass(x, refs):
     l2 = lin(l1, 256)
 
     # First predicted heatmaps
-    out1 = tf.layers.conv2d(l2, refs["nparts"], kernel_size=[1, 1])
+    out1 = tf.layers.conv2d(l2, nparts, kernel_size=[1, 1])
     out1_ = tf.layers.conv2d(l2, 256 + 128, kernel_size=[1, 1])
 
     # Concatenate with previous linear features
@@ -199,16 +201,63 @@ def stacked_hourglass(x, refs):
     l4 = lin(l3, 512)
 
     # Output heatmaps
-    out2 = tf.layers.conv2d(l4, refs["nparts"], kernel_size=[1, 1])
+    out2 = tf.layers.conv2d(l4, nparts, kernel_size=[1, 1])
 
     return out1, out2
 
 
-train_annots = load_annots("train")
+def get_preds(heatmap):
+    reduce_x = tf.reduce_max(heatmap, axis=1)
+    reduce_y = tf.reduce_max(heatmap, axis=2)
+    idx_x = tf.expand_dims(tf.argmax(reduce_y, axis=1), axis=2)
+    idx_y = tf.expand_dims(tf.argmax(reduce_x, axis=1), axis=2)
+    return tf.concat([idx_x, idx_y], axis=2)
+
+
+def calc_dists(preds, labels, normalize):
+    stacked = tf.stack([preds, labels], axis=2)
+
+    def map_channel(x):
+        pred = x[0]
+        label = x[1]
+
+        dist = tf.reduce_sum(tf.to_float(tf.pow(pred - label, 2)) / normalize)
+        return tf.cond(
+            tf.logical_and(label[0] > 0, label[1] > 0),
+            true_fn=lambda: dist,
+            false_fn=lambda: tf.constant(-1, dtype=tf.float32))
+
+    def map_batch(x):
+        return tf.map_fn(map_channel, x, back_prop=False, dtype=tf.float32)
+
+    return tf.transpose(tf.map_fn(map_batch, stacked, back_prop=False, dtype=tf.float32))
+
+
+def dist_accuracy(dists):
+    thr = 0.5
+    valid = tf.not_equal(dists, -1)
+    thres = tf.less(tf.to_float(dists), tf.to_float(thr))
+    total_count = tf.reduce_sum(tf.to_float(valid))
+    thres_count = tf.reduce_sum(tf.to_float(tf.logical_and(thres, valid)))
+    return tf.cond(
+        total_count > 0,
+        true_fn=lambda: total_count / thres_count,
+        false_fn=lambda: tf.constant(-1, dtype=tf.float32))
+
+
+def heatmapAccuracy(output, label):
+    preds = get_preds(output)
+    gt = get_preds(label) # ground truth
+    dists = calc_dists(preds, gt, normalize=tf.to_float(opts.output_res / 10.0))
+    acc = tf.map_fn(dist_accuracy, dists, back_prop=False)
+    valid_sum = tf.reduce_sum(tf.maximum(acc, 0.0))
+    valid_count = tf.reduce_sum(tf.to_float(tf.not_equal(acc, -1.0)))
+    return valid_sum / valid_count
+
 
 
 def model_fn(features, labels, mode):
-    out1, out2 = stacked_hourglass(features, train_annots["ref"])
+    out1, out2 = stacked_hourglass(features["input"], features["ref"]["nparts"])
 
     if mode == tf.estimator.ModeKeys.PREDICT:
         return tf.estimator.EstimatorSpec(mode, predictions=out2)
@@ -216,29 +265,52 @@ def model_fn(features, labels, mode):
     loss = tf.losses.mean_squared_error([labels, labels], [out1, out2])
     train_op = tf.train.RMSPropOptimizer(2.5e-4) \
         .minimize(loss, global_step=tf.train.get_global_step())
+
+    tf.summary.scalar("accuracy", heatmapAccuracy(out2, labels))
+
     return tf.estimator.EstimatorSpec(
         mode=mode,
         predictions=out2,
         loss=loss,
-        train_op=train_op)
+        train_op=train_op,
+        training_hooks=[
+            tf.train.SummarySaverHook(
+                save_steps=1,
+                output_dir="./model",
+                summary_op=tf.summary.merge_all()
+            ),
+        ],
+        eval_metric_ops={
+            "accuracy": (heatmapAccuracy(out2, labels), tf.no_op())
+        }
+    )
+
+
 # https://developers.googleblog.com/2017/09/introducing-tensorflow-datasets.html
 
-model = tf.estimator.Estimator(model_fn)
-
+model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir)
 
 def train_input_fn():
+    # TODO: move to somewhere
+    train_annots = load_annots("train")
+
     dataset = train_annots["dataset"] \
         .map(decode_and_crop, num_parallel_calls=8) \
+        .repeat() \
         .prefetch(32) \
-        .batch(4) \
-        .repeat()
+        .batch(4)
 
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
     # -> batch width height channel
     multichannel = tf.transpose(data["labels"], perm=[0, 2, 3, 1])
-    return data["input"], multichannel
+    features = {
+        "input": data["input"],
+        "ref": train_annots["ref"]
+    }
+    return features, multichannel
+
 
 for epoch in range(100):
     print("epoch ", epoch)
-    model.train(train_input_fn, steps=4000, hooks=[tf.train.StepCounterHook()])
+    model.train(train_input_fn, steps=4000)

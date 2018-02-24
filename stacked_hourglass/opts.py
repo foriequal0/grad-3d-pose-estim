@@ -7,7 +7,7 @@ parser = argparse.ArgumentParser()
 _general = parser.add_argument_group("General options")
 _general.add_argument("--exp-id", default="default")
 _general.add_argument("--data-dir", default="./data")
-_general.add_argument("--exp-dir", default="./exp")
+_general.add_argument("--model-dir", default="./model")
 _general.add_argument("--manual-seed", default=-1, type=int)
 
 _training = parser.add_argument_group("Training options")
