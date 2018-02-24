@@ -1,13 +1,40 @@
-import os
+
+def get_idle_gpu():
+    import subprocess
+    import json
+    gpustat_json = subprocess.check_output("gpustat --json", shell=True)
+    gpustat = json.loads(gpustat_json.decode("utf-8"))
+    for gpu in gpustat["gpus"]:
+        if len(gpu["processes"]) == 0:
+            return int(gpu["index"])
+
+    return None
+
+
+def cuda_visible_to_idle():
+    import shutil
+    if not shutil.which("gpustat"):
+        return
+
+    idle_gpu = get_idle_gpu()
+    if idle_gpu is None:
+        raise Exception("No idle gpu")
+
+    import os
+    os.putenv("CUDA_VISIBLE_DEVICES", str(idle_gpu))
+
+
+cuda_visible_to_idle()
+
 from os import path
 import h5py
 import tensorflow as tf
 from stacked_hourglass.opts import opts
 
+
 tf.logging.set_verbosity(tf.logging.INFO)
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
-sess = tf.Session(config=config)
 
 
 def load_annots(label):
@@ -247,13 +274,12 @@ def dist_accuracy(dists):
 
 def heatmapAccuracy(output, label):
     preds = get_preds(output)
-    gt = get_preds(label) # ground truth
+    gt = get_preds(label)  # ground truth
     dists = calc_dists(preds, gt, normalize=tf.to_float(opts.output_res / 10.0))
     acc = tf.map_fn(dist_accuracy, dists, back_prop=False)
     valid_sum = tf.reduce_sum(tf.maximum(acc, 0.0))
     valid_count = tf.reduce_sum(tf.to_float(tf.not_equal(acc, -1.0)))
     return valid_sum / valid_count
-
 
 
 def model_fn(features, labels, mode):
@@ -286,10 +312,6 @@ def model_fn(features, labels, mode):
     )
 
 
-# https://developers.googleblog.com/2017/09/introducing-tensorflow-datasets.html
-
-model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir)
-
 def train_input_fn():
     # TODO: move to somewhere
     train_annots = load_annots("train")
@@ -311,6 +333,14 @@ def train_input_fn():
     return features, multichannel
 
 
-for epoch in range(100):
-    print("epoch ", epoch)
-    model.train(train_input_fn, steps=4000)
+def main():
+    # https://developers.googleblog.com/2017/09/introducing-tensorflow-datasets.html
+    model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir,
+                                   config=tf.estimator.RunConfig(session_config=config))
+    for epoch in range(100):
+        print("epoch ", epoch)
+        model.train(train_input_fn, steps=4000)
+
+
+if __name__ == "__main__":
+    main()
