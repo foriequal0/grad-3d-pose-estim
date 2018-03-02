@@ -269,8 +269,8 @@ def dist_accuracy(dists):
     total_count = tf.reduce_sum(tf.to_float(valid))
     thres_count = tf.reduce_sum(tf.to_float(tf.logical_and(thres, valid)))
     return tf.cond(
-        total_count > 0,
-        true_fn=lambda: total_count / thres_count,
+        tf.greater(total_count, 0),
+        true_fn=lambda: thres_count / total_count,
         false_fn=lambda: tf.constant(-1, dtype=tf.float32))
 
 
