@@ -23,6 +23,8 @@ def cuda_visible_to_idle():
     import os
     os.putenv("CUDA_VISIBLE_DEVICES", str(idle_gpu))
 
+    print("CUDA_VISIBLE_DEVICES:", idle_gpu, "check:", os.getenv("CUDA_VISIBLE_DEVICES"))
+
 
 cuda_visible_to_idle()
 
