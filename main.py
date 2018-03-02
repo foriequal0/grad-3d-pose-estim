@@ -91,6 +91,8 @@ def crop(image, center, scale):
 
 
 def draw_gaussian(pos, center, scale, sigma):
+    # TODO: opts invariant
+
     input_res = tf.to_float(opts.input_res)
     output_res = tf.to_float(opts.output_res)
 
@@ -180,27 +182,24 @@ def hourglass(x, n, num_out):
         lower = residual(lower, num_out)
 
     lower = residual(lower, num_out)
-    lower = tf.keras.layers.UpSampling2D([2, 2]).apply(lower)
+    input_shape = x.get_shape()
+    lower = tf.image.resize_images(lower, input_shape[1:3],
+                                   tf.image.ResizeMethod.NEAREST_NEIGHBOR)
 
     return lower + upper
 
 
 def lin(x, num_out):
     x = tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
-    x = tf.layers.batch_normalization(x)
-    x = tf.nn.relu(x)
+    x = tf.nn.relu(tf.layers.batch_normalization(x))
     return x
 
 
 def stacked_hourglass(x, nparts):
     # preprocess
-    conv1 = tf.layers.conv2d(x, 64, kernel_size=[7, 7], strides=[2, 2], padding='SAME')  # 128
-
-    conv1 = tf.layers.batch_normalization(conv1)
-    conv1 = tf.nn.relu(conv1)
-
+    conv1 = tf.layers.conv2d(x, 64, [7, 7], strides=[2, 2], padding='SAME')  # 128
+    conv1 = tf.nn.relu(tf.layers.batch_normalization(conv1))
     r1 = residual(conv1, 128)
-
     pool = tf.layers.max_pooling2d(r1, [2, 2], [2, 2])  # 64
 
     r4 = residual(pool, 128)
@@ -219,7 +218,7 @@ def stacked_hourglass(x, nparts):
 
     # Concatenate with previous linear features
     cat1 = tf.concat([l2, pool], 3)  # concat channel
-    cat1_ = tf.layers.conv2d(cat1, 256 + 128, kernel_size=[1, 1])
+    cat1_ = tf.layers.conv2d(cat1, 256 + 128, [1, 1])
 
     int1 = out1_ + cat1_
 
@@ -230,7 +229,7 @@ def stacked_hourglass(x, nparts):
     l4 = lin(l3, 512)
 
     # Output heatmaps
-    out2 = tf.layers.conv2d(l4, nparts, kernel_size=[1, 1])
+    out2 = tf.layers.conv2d(l4, nparts, [1, 1])
 
     return out1, out2
 
@@ -252,14 +251,17 @@ def calc_dists(preds, labels, normalize):
 
         dist = tf.reduce_sum(tf.to_float(tf.pow(pred - label, 2)) / normalize)
         return tf.cond(
-            tf.logical_and(label[0] > 0, label[1] > 0),
+            tf.logical_and(tf.greater(label[0], 0), tf.greater(label[1], 0)),
             true_fn=lambda: dist,
             false_fn=lambda: tf.constant(-1, dtype=tf.float32))
 
     def map_batch(x):
         return tf.map_fn(map_channel, x, back_prop=False, dtype=tf.float32)
 
-    return tf.transpose(tf.map_fn(map_batch, stacked, back_prop=False, dtype=tf.float32))
+    # (batch, channel, [pred, label], [x, y])
+    # -> (batch, channel)
+    dists = tf.map_fn(map_batch, stacked, back_prop=False, dtype=tf.float32)
+    return tf.transpose(dists)
 
 
 def dist_accuracy(dists):
@@ -277,7 +279,7 @@ def dist_accuracy(dists):
 def heatmapAccuracy(output, label):
     preds = get_preds(output)
     gt = get_preds(label)  # ground truth
-    dists = calc_dists(preds, gt, normalize=tf.to_float(opts.output_res / 10.0))
+    dists = calc_dists(preds, gt, normalize=tf.to_float(opts.output_res / 10.0)) # 10? why 10?
     acc = tf.map_fn(dist_accuracy, dists, back_prop=False)
     valid_sum = tf.reduce_sum(tf.maximum(acc, 0.0))
     valid_count = tf.reduce_sum(tf.to_float(tf.not_equal(acc, -1.0)))
@@ -303,8 +305,8 @@ def model_fn(features, labels, mode):
         train_op=train_op,
         training_hooks=[
             tf.train.SummarySaverHook(
-                save_steps=1,
-                output_dir="./model",
+                save_secs=10,
+                output_dir="./log",
                 summary_op=tf.summary.merge_all()
             ),
         ],
@@ -315,7 +317,6 @@ def model_fn(features, labels, mode):
 
 
 def train_input_fn():
-    # TODO: move to somewhere
     train_annots = load_annots("train")
 
     dataset = train_annots["dataset"] \
@@ -327,12 +328,12 @@ def train_input_fn():
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
     # -> batch width height channel
-    multichannel = tf.transpose(data["labels"], perm=[0, 2, 3, 1])
+    channel_last = tf.transpose(data["labels"], perm=[0, 2, 3, 1])
     features = {
         "input": data["input"],
         "ref": train_annots["ref"]
     }
-    return features, multichannel
+    return features, channel_last
 
 
 def main():
