@@ -322,8 +322,8 @@ def train_input_fn():
     dataset = train_annots["dataset"] \
         .map(decode_and_crop, num_parallel_calls=8) \
         .repeat() \
-        .prefetch(32) \
-        .batch(4)
+        .prefetch(16) \
+        .batch(16)
 
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
@@ -342,7 +342,7 @@ def main():
                                    config=tf.estimator.RunConfig(session_config=config))
     for epoch in range(100):
         print("epoch ", epoch)
-        model.train(train_input_fn, steps=4000)
+        model.train(train_input_fn, steps=1000)
 
 
 if __name__ == "__main__":
