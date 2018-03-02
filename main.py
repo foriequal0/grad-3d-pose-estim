@@ -214,8 +214,8 @@ def stacked_hourglass(x, nparts):
     l2 = lin(l1, 256)
 
     # First predicted heatmaps
-    out1 = tf.layers.conv2d(l2, nparts, kernel_size=[1, 1])
-    out1_ = tf.layers.conv2d(l2, 256 + 128, kernel_size=[1, 1])
+    out1 = tf.layers.conv2d(l2, nparts, [1, 1])
+    out1_ = tf.layers.conv2d(out1, 256 + 128, [1, 1])
 
     # Concatenate with previous linear features
     cat1 = tf.concat([l2, pool], 3)  # concat channel
