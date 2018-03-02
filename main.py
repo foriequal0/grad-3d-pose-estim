@@ -286,7 +286,40 @@ def heatmapAccuracy(output, label):
     return valid_sum / valid_count
 
 
+def summary_label(label):
+    def sum(channels):
+        return tf.reduce_sum(channels, axis=0, keep_dims=False)
+
+    channel_first = tf.transpose(label, perm=[0, 3, 1, 2]) # (batch, H, W, chan) -> (batch, chan, H, W)
+    summary = tf.map_fn(sum, channel_first, back_prop=False) # (batch, H, W)
+    return tf.expand_dims(summary, axis=3)
+
+
+def filtered_summary(groundtruth, heatmap):
+    def filter(accum, stacked):
+        gt = stacked[0]
+        hm = stacked[1]
+        max = tf.reduce_max(hm)
+        return tf.cond(
+            tf.not_equal(tf.reduce_sum(gt), 0),
+            true_fn=lambda: accum + tf.pow(hm / max, 2),
+            false_fn=lambda: accum,
+        )
+
+    def filter_sum(channels):
+        return tf.foldl(filter, channels, initializer=tf.zeros(channels[0][0].get_shape()), back_prop=False)
+
+    # (batch, H, W, chan) -> (batch, chan, H, W)
+    channel_first_groundtruth = tf.transpose(groundtruth, perm=[0, 3, 1, 2])
+    channel_first_heatmap = tf.transpose(heatmap, perm=[0, 3, 1, 2])
+
+    stacked = tf.stack([channel_first_groundtruth, channel_first_heatmap], axis=2) # (batch, chan, 2, H, W)
+    summary = tf.map_fn(filter_sum, stacked, back_prop=False) # (batch, H, W)
+    return tf.expand_dims(summary, axis=3)
+
+
 def model_fn(features, labels, mode):
+    input = features["input"]
     out1, out2 = stacked_hourglass(features["input"], features["ref"]["nparts"])
 
     if mode == tf.estimator.ModeKeys.PREDICT:
@@ -297,6 +330,17 @@ def model_fn(features, labels, mode):
         .minimize(loss, global_step=tf.train.get_global_step())
 
     tf.summary.scalar("accuracy", heatmapAccuracy(out2, labels))
+
+    tf.summary.image("image", input)
+    tf.summary.image("labels", summary_label(labels))
+
+    tf.summary.image("out1", summary_label(out1))
+    tf.summary.image("out2", summary_label(out2))
+
+    tf.summary.image("out1-filtered", filtered_summary(labels, out1))
+    tf.summary.image("out2-filtered", filtered_summary(labels, out2))
+
+    # summary에 image, sum of labels, sum of out2 출력
 
     return tf.estimator.EstimatorSpec(
         mode=mode,
