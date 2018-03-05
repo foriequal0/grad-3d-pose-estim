@@ -148,6 +148,26 @@ def make_feature_and_labels(annot):
     result["labels"] = to_channel_last(labels, batch=False)
     return result
 
+matched_parts = [
+	(1,4), (2,5), (10,14), (11,15), (12,16), (13,17), (22,23), (24,25),
+    (29,30), (32,33), (34,36), (35,37), (38,39), (40,41), (42,44), (43,45),
+    (46,48), (47,49), (50,51), (52,53), (54,55), (56,57), (58,59), (60,61),
+    (62,63), (64,65), (66,67), (68,69), (70,71), (72,73), (74,75), (76,77),
+    (78,80), (79,81), (83,85), (84,86), (87,89), (88,90), (91,93), (92,94),
+    (95,96), (97,98), (99,100), (101,102)
+]
+
+# labels: channel first
+def shuffleLR(labels):
+    assert(len(labels.shape) == 3)
+    def _shuffleLR(labels):
+        res = [x for x in labels]
+        for l, r in matched_parts:
+            res[l-1], res[r-1] = res[r-1], res[l-1]
+        return np.array(res, dtype=np.float32)
+
+    return tf.py_func(_shuffleLR, [labels], tf.float32, stateful=False)
+    
 
 def augment(annot):
     input = annot["input"]
@@ -189,8 +209,28 @@ def augment(annot):
         )
         return img
 
-    inputs = resize_and_rotate(input, opts.input_res, r, s)
-    outputs = resize_and_rotate(labels, opts.output_res, r, s)
+    input = resize_and_rotate(input, opts.input_res, r, s)
+    labels = resize_and_rotate(labels, opts.output_res, r, s)
+
+    flip = tf.random_uniform([], 0, 1) > 0.5
+    input = tf.cond(
+        flip,
+        true_fn= lambda: input,
+        false_fn= lambda: tf.image.flip_left_right(input)
+    )
+
+    def label_flip(x):
+        x = to_channel_first(x, batch=False)
+        x = shuffleLR(x)
+        x = to_channel_last(x, batch=False)
+        x = tf.image.flip_left_right(x)
+        return x
+
+    labels = tf.cond(
+        flip,
+        true_fn= lambda: labels,
+        false_fn= lambda: label_flip(labels)
+    )
 
     result = annot.copy()
     result["input"] = input
