@@ -300,22 +300,31 @@ def filtered_summary(groundtruth, heatmap):
         gt = stacked[0]
         hm = stacked[1]
         max = tf.reduce_max(hm)
+        hm_out = tf.pow(hm / max, 2) / 2
+        hm_out = tf.expand_dims(hm_out, axis=2) # add channel
+
+        zeros =  tf.zeros(gt.get_shape())
+        hm_pred = tf.to_float(tf.equal(hm, max))
+        hm_pred = tf.stack([hm_pred, zeros, zeros], axis=2)
         return tf.cond(
             tf.not_equal(tf.reduce_sum(gt), 0),
-            true_fn=lambda: accum + tf.pow(hm / max, 2),
+            true_fn=lambda: accum + hm_out + hm_pred,
             false_fn=lambda: accum,
         )
 
     def filter_sum(channels):
-        return tf.foldl(filter, channels, initializer=tf.zeros(channels[0][0].get_shape()), back_prop=False)
+        gt_shape = channels[0][0].get_shape()
+        return tf.foldl(filter, channels,
+                        initializer=tf.zeros([gt_shape[0], gt_shape[1], 3]),
+                        back_prop=False)
 
     # (batch, H, W, chan) -> (batch, chan, H, W)
     channel_first_groundtruth = tf.transpose(groundtruth, perm=[0, 3, 1, 2])
     channel_first_heatmap = tf.transpose(heatmap, perm=[0, 3, 1, 2])
 
     stacked = tf.stack([channel_first_groundtruth, channel_first_heatmap], axis=2) # (batch, chan, 2, H, W)
-    summary = tf.map_fn(filter_sum, stacked, back_prop=False) # (batch, H, W)
-    return tf.expand_dims(summary, axis=3)
+    summary = tf.map_fn(filter_sum, stacked, back_prop=False) # (batch, H, W, channels)
+    return summary
 
 
 def model_fn(features, labels, mode):
