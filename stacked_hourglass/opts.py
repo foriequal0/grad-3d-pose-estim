@@ -22,5 +22,6 @@ _data = parser.add_argument_group("Data Options")
 _data.add_argument("--input-res", default=256, type=int)
 _data.add_argument("--output-res", default=64, type=int)
 _data.add_argument("--scale-factor", default=0.25, type=float)
+_data.add_argument("--rot-factor", default=30.0, type=float)
 
 opts, _unknown = parser.parse_known_args()

@@ -37,6 +37,20 @@ config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 
 
+def to_channel_first(x, batch=True):
+    if batch:
+        return tf.transpose(x, perm=[0, 3, 1, 2])
+    else:
+        return tf.transpose(x, perm=[2, 0, 1])
+
+
+def to_channel_last(x, batch=True):
+    if batch:
+        return tf.transpose(x, perm=[0, 2, 3, 1])
+    else:
+        return tf.transpose(x, perm=[1, 2, 0])
+
+
 def load_annots(label):
     names_filename = path.join(opts.data_dir, "pascal3d", "annot",
                                "{}_images.txt".format(label))
@@ -108,7 +122,7 @@ def draw_gaussian(pos, center, scale, sigma):
     return X
 
 
-def decode_and_crop(annot):
+def make_feature_and_labels(annot):
     filename = annot["image"]
     image_path = tf.string_join([opts.data_dir, "pascal3d", "images", filename], separator="/")
     parts = tf.to_float(annot["part"])
@@ -131,6 +145,54 @@ def decode_and_crop(annot):
 
     result = annot.copy()
     result["input"] = image_cropped
+    result["labels"] = to_channel_last(labels, batch=False)
+    return result
+
+
+def augment(annot):
+    input = annot["input"]
+    labels = annot["labels"]
+
+    # color variance
+    input = tf.clip_by_value(
+        input * tf.random_uniform([1, 1, 3], 0.8, 1.2),
+        clip_value_min=0.0,
+        clip_value_max=1.0)
+
+
+    scale_factor = tf.to_float(opts.scale_factor)
+    rot_factor = tf.to_float(opts.rot_factor)
+
+    s = tf.clip_by_value(tf.random_normal([]) * scale_factor + 1.0,
+                         clip_value_min=1.0-scale_factor,
+                         clip_value_max=1.0+scale_factor)
+
+    # rot_factor(degree) -> radian
+    r = tf.clip_by_value(tf.random_normal([]) * rot_factor,
+                         clip_value_min=-2.0 * rot_factor,
+                         clip_value_max=2.0 * rot_factor) / 180.0 * math.pi
+
+    # 60% 확률로 r == 0
+    r = r * tf.to_float(tf.random_uniform([]) > 0.6)
+
+    input = tf.image.resize_images(
+        input, tf.to_int32(tf.to_float([opts.input_res, opts.input_res]) * s)
+    )
+    input = tf.contrib.image.rotate(input, r)
+    input = tf.image.resize_image_with_crop_or_pad(
+        input, opts.input_res, opts.input_res
+    )
+
+    labels = tf.image.resize_images(
+        labels, tf.to_int32(tf.to_float([opts.output_res, opts.output_res]) * s)
+    )
+    labels = tf.contrib.image.rotate(labels, r)
+    labels = tf.image.resize_image_with_crop_or_pad(
+        labels, opts.output_res, opts.output_res
+    )
+
+    result = annot.copy()
+    result["input"] = input
     result["labels"] = labels
     return result
 
@@ -288,7 +350,7 @@ def summary_label(label):
     def sum(channels):
         return tf.reduce_sum(channels, axis=0, keep_dims=False)
 
-    channel_first = tf.transpose(label, perm=[0, 3, 1, 2]) # (batch, H, W, chan) -> (batch, chan, H, W)
+    channel_first = to_channel_first(label) # (batch, H, W, chan) -> (batch, chan, H, W)
     summary = tf.map_fn(sum, channel_first, back_prop=False) # (batch, H, W)
     return tf.expand_dims(summary, axis=3)
 
@@ -317,8 +379,8 @@ def filtered_summary(groundtruth, heatmap):
                         back_prop=False)
 
     # (batch, H, W, chan) -> (batch, chan, H, W)
-    channel_first_groundtruth = tf.transpose(groundtruth, perm=[0, 3, 1, 2])
-    channel_first_heatmap = tf.transpose(heatmap, perm=[0, 3, 1, 2])
+    channel_first_groundtruth = to_channel_first(groundtruth)
+    channel_first_heatmap = to_channel_first(heatmap)
 
     stacked = tf.stack([channel_first_groundtruth, channel_first_heatmap], axis=2) # (batch, chan, 2, H, W)
     summary = tf.map_fn(filter_sum, stacked, back_prop=False) # (batch, H, W, channels)
@@ -364,7 +426,7 @@ def heatmap_thumbs(heatmaps):
         print("plots", end - start)
         return arr
 
-    heatmaps = tf.transpose(heatmaps, perm=[0, 3, 1, 2])
+    heatmaps = to_channel_first(heatmaps)
     # return tf.py_func(plots, [heatmaps], tf.uint8, stateful=False)
 
     def py_plot(heatmap):
@@ -422,7 +484,8 @@ def train_input_fn():
     train_annots = load_annots("train")
 
     dataset = train_annots["dataset"] \
-        .map(decode_and_crop, num_parallel_calls=8) \
+        .map(make_feature_and_labels, num_parallel_calls=8) \
+        .map(augment, num_parallel_calls=8) \
         .repeat() \
         .prefetch(16) \
         .batch(16)
@@ -430,12 +493,12 @@ def train_input_fn():
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
     # -> batch width height channel
-    channel_last = tf.transpose(data["labels"], perm=[0, 2, 3, 1])
+
     features = {
         "input": data["input"],
         "ref": train_annots["ref"]
     }
-    return features, channel_last
+    return features, data["labels"]
 
 
 def train_main():
@@ -451,7 +514,7 @@ def pred_input_fn():
     train_annots = load_annots("valid")
 
     dataset = train_annots["dataset"] \
-        .map(decode_and_crop, num_parallel_calls=8) \
+        .map(make_feature_and_labels, num_parallel_calls=8) \
         .prefetch(16) \
         .batch(16)
 
@@ -475,7 +538,7 @@ def dummy_main():
     train_annots = load_annots("valid")
 
     dataset = train_annots["dataset"] \
-        .map(decode_and_crop, num_parallel_calls=8) \
+        .map(make_feature_and_labels, num_parallel_calls=8) \
         .prefetch(16) \
         .batch(16)
 
