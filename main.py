@@ -1,4 +1,3 @@
-
 def get_idle_gpu():
     import subprocess
     import json
@@ -32,7 +31,6 @@ from os import path
 import h5py
 import tensorflow as tf
 from stacked_hourglass.opts import opts
-
 
 tf.logging.set_verbosity(tf.logging.INFO)
 config = tf.ConfigProto()
@@ -326,6 +324,54 @@ def filtered_summary(groundtruth, heatmap):
     summary = tf.map_fn(filter_sum, stacked, back_prop=False) # (batch, H, W, channels)
     return summary
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.figure
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+
+import numpy as np
+import math
+from datetime import datetime
+
+def heatmap_thumbs(heatmaps):
+    def plot(heatmaps):
+        fig = matplotlib.figure.Figure(
+            figsize=(7, 7),
+            dpi=300
+        )
+
+        cols = int(math.ceil(math.sqrt(heatmaps.shape[0])))
+
+        for i in range(heatmaps.shape[0]):
+            ax = fig.add_subplot(cols, cols, i + 1)
+            ax.imshow(heatmaps[i], vmin=0, vmax=1)
+
+        if fig.canvas is None:
+            FigureCanvasAgg(fig)
+
+        fig.canvas.draw()
+        data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
+        data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        return data
+
+    def plots(heatmaps_batch):
+        start = datetime.now()
+        outputs = []
+        for heatmap in heatmaps_batch:
+            outputs.append(plot(heatmap))
+        arr = np.array(outputs, dtype=np.uint8)
+        end = datetime.now()
+        print("plots", end - start)
+        return arr
+
+    heatmaps = tf.transpose(heatmaps, perm=[0, 3, 1, 2])
+    # return tf.py_func(plots, [heatmaps], tf.uint8, stateful=False)
+
+    def py_plot(heatmap):
+        return tf.py_func(plot, [heatmap], tf.uint8, False)
+
+    return tf.map_fn(py_plot, heatmaps, back_prop=False, dtype=tf.uint8)
+
 
 def model_fn(features, labels, mode):
     input = features["input"]
@@ -342,12 +388,15 @@ def model_fn(features, labels, mode):
 
     tf.summary.image("image", input)
     tf.summary.image("labels", summary_label(labels))
+    # tf.summary.image("labels-thumb", heatmap_thumbs(out2))
 
     tf.summary.image("out1", summary_label(out1))
     tf.summary.image("out2", summary_label(out2))
 
     tf.summary.image("out1-filtered", filtered_summary(labels, out1))
     tf.summary.image("out2-filtered", filtered_summary(labels, out2))
+
+    # tf.summary.image("out2-thumb", heatmap_thumbs(out2))
 
     # summary에 image, sum of labels, sum of out2 출력
 
