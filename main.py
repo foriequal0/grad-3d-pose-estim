@@ -175,21 +175,22 @@ def augment(annot):
     # 60% 확률로 r == 0
     r = r * tf.to_float(tf.random_uniform([]) > 0.6)
 
-    input = tf.image.resize_images(
-        input, tf.to_int32(tf.to_float([opts.input_res, opts.input_res]) * s)
-    )
-    input = tf.contrib.image.rotate(input, r)
-    input = tf.image.resize_image_with_crop_or_pad(
-        input, opts.input_res, opts.input_res
-    )
+    def resize_and_rotate(img, res, r, s):
+        img = tf.image.resize_images(
+            img, tf.to_int32(tf.to_float([res, res]) * s)
+        )
+        # pad not to clip corners. cheap and fast math.sqrt(2)
+        img = tf.image.resize_image_with_crop_or_pad(
+            img, int(res * math.sqrt(2)), int(res * math.sqrt(2))
+        )
+        img = tf.contrib.image.rotate(img, r)
+        img = tf.image.resize_image_with_crop_or_pad(
+            img, res, res
+        )
+        return img
 
-    labels = tf.image.resize_images(
-        labels, tf.to_int32(tf.to_float([opts.output_res, opts.output_res]) * s)
-    )
-    labels = tf.contrib.image.rotate(labels, r)
-    labels = tf.image.resize_image_with_crop_or_pad(
-        labels, opts.output_res, opts.output_res
-    )
+    inputs = resize_and_rotate(input, opts.input_res, r, s)
+    outputs = resize_and_rotate(labels, opts.output_res, r, s)
 
     result = annot.copy()
     result["input"] = input
