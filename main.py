@@ -389,7 +389,7 @@ def train_input_fn():
     return features, channel_last
 
 
-def main():
+def train_main():
     # https://developers.googleblog.com/2017/09/introducing-tensorflow-datasets.html
     model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir,
                                    config=tf.estimator.RunConfig(session_config=config))
@@ -398,5 +398,52 @@ def main():
         model.train(train_input_fn, steps=1000)
 
 
+def pred_input_fn():
+    train_annots = load_annots("valid")
+
+    dataset = train_annots["dataset"] \
+        .map(decode_and_crop, num_parallel_calls=8) \
+        .prefetch(16) \
+        .batch(16)
+
+    data = dataset.make_one_shot_iterator().get_next()
+
+    features = {
+        "input": data["input"],
+        "ref": train_annots["ref"]
+    }
+    return features
+
+
+def pred_main():
+    model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir,
+                                   config=tf.estimator.RunConfig(session_config=config))
+
+    return model.predict(pred_input_fn)
+
+
+def dummy_main():
+    train_annots = load_annots("valid")
+
+    dataset = train_annots["dataset"] \
+        .map(decode_and_crop, num_parallel_calls=8) \
+        .prefetch(16) \
+        .batch(16)
+
+    data = dataset.make_one_shot_iterator().get_next()
+
+    with tf.Session() as sess:
+        return sess.run(data["labels"])
+
+
+
 if __name__ == "__main__":
-    main()
+    if opts.mode == "train":
+        train_main()
+    elif opts.mode == "pred":
+        pred_main()
+    elif opts.mode == "dummy":
+        dummy_main()
+    else:
+        raise ValueError("Invalid mode " + opts.mode)
+

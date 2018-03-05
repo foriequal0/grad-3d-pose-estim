@@ -5,6 +5,7 @@ __all__ = ["parser", "opts"]
 parser = argparse.ArgumentParser()
 
 _general = parser.add_argument_group("General options")
+_general.add_argument("--mode", default="train", choices=["train", "pred", "dummy"])
 _general.add_argument("--exp-id", default="default")
 _general.add_argument("--data-dir", default="./data")
 _general.add_argument("--model-dir", default="./model")
