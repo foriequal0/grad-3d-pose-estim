@@ -526,6 +526,7 @@ def train_input_fn():
     train_annots = load_annots("train")
 
     dataset = train_annots["dataset"] \
+        .shuffle(1024) \
         .map(make_feature_and_labels, num_parallel_calls=8) \
         .map(augment, num_parallel_calls=8) \
         .repeat() \
