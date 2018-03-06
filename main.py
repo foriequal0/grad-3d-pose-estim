@@ -488,6 +488,7 @@ def model_fn(features, labels, mode):
         .minimize(loss, global_step=tf.train.get_global_step())
 
     tf.summary.scalar("accuracy", heatmapAccuracy(out2, labels))
+    tf.summary.scalar("loss", loss)
 
     tf.summary.image("image", input)
     tf.summary.image("labels", summary_label(labels))
