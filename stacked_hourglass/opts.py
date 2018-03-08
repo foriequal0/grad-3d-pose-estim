@@ -8,7 +8,8 @@ _general = parser.add_argument_group("General options")
 _general.add_argument("--mode", default="train", choices=["train", "pred", "dummy"])
 _general.add_argument("--exp-id", default="default")
 _general.add_argument("--data-dir", default="./data")
-_general.add_argument("--model-dir", default="./model")
+_general.add_argument("--model-dir", default="./model/{exp-id}")
+_general.add_argument("--log-dir", default="./log/{exp-id}")
 _general.add_argument("--manual-seed", default=-1, type=int)
 
 _training = parser.add_argument_group("Training options")
@@ -25,3 +26,7 @@ _data.add_argument("--scale-factor", default=0.25, type=float)
 _data.add_argument("--rot-factor", default=30.0, type=float)
 
 opts, _unknown = parser.parse_known_args()
+if "{exp-id}" in opts.model_dir:
+    opts.model_dir = opts.model_dir.format(**{"exp-id": opts.exp_id})
+if "{exp-id}" in opts.log_dir:
+    opts.log_dir = opts.log_dir.format(**{"exp-id": opts.exp_id})

@@ -126,10 +126,9 @@ def draw_gaussian(pos, center, scale, sigma):
     return X
 
 
-def make_feature_and_labels(annot):
+def make_input_crop(annot):
     filename = annot["image"]
     image_path = tf.string_join([opts.data_dir, "pascal3d", "images", filename], separator="/")
-    parts = tf.to_float(annot["part"])
     center = tf.to_float(annot["center"])
     scale = tf.to_float(annot["scale"]) / 1.28  # 1.28 is 256/200, original paper impl.'s flaw
 
@@ -138,6 +137,18 @@ def make_feature_and_labels(annot):
     image_decoded.set_shape([None, None, 3])  # decode_image doesn't set channels correctly
 
     image_cropped = crop(image_decoded, center, scale)
+
+    result = annot.copy()
+    result["input"] = image_cropped
+    return result
+
+
+def make_feature_and_labels(annot):
+    annot = make_input_crop(annot)
+
+    parts = tf.to_float(annot["part"])
+    center = tf.to_float(annot["center"])
+    scale = tf.to_float(annot["scale"]) / 1.28  # 1.28 is 256/200, original paper impl.'s flaw
 
     def make_labels(part):
         return tf.cond(
@@ -148,7 +159,6 @@ def make_feature_and_labels(annot):
     labels = tf.map_fn(make_labels, parts, back_prop=False, dtype=tf.float32)
 
     result = annot.copy()
-    result["input"] = image_cropped
     result["labels"] = to_channel_last(labels, batch=False)
     return result
 
@@ -476,7 +486,10 @@ def model_fn(features, labels, mode):
     out1, out2 = stacked_hourglass(features["input"], features["ref"]["nparts"])
 
     if mode == tf.estimator.ModeKeys.PREDICT:
-        return tf.estimator.EstimatorSpec(mode, predictions=out2)
+        return tf.estimator.EstimatorSpec(mode, predictions={
+            "index": features["index"],
+            "heatmaps": out2
+        })
 
     loss = tf.losses.mean_squared_error([labels, labels], [out1, out2])
     train_op = tf.train.RMSPropOptimizer(2.5e-4) \
@@ -501,13 +514,15 @@ def model_fn(features, labels, mode):
 
     return tf.estimator.EstimatorSpec(
         mode=mode,
-        predictions=out2,
+        predictions={
+            "heatmaps": out2,
+        },
         loss=loss,
         train_op=train_op,
         training_hooks=[
             tf.train.SummarySaverHook(
                 save_secs=10,
-                output_dir="./log",
+                output_dir=opts.log_dir,
                 summary_op=tf.summary.merge_all()
             ),
         ],
@@ -552,13 +567,13 @@ def pred_input_fn():
     train_annots = load_annots("valid")
 
     dataset = train_annots["dataset"] \
-        .map(make_feature_and_labels, num_parallel_calls=8) \
-        .prefetch(16) \
-        .batch(16)
+        .map(make_input_crop, num_parallel_calls=8) \
+        .batch(4)
 
     data = dataset.make_one_shot_iterator().get_next()
 
     features = {
+        "index": data["index"],
         "input": data["input"],
         "ref": train_annots["ref"]
     }
@@ -569,7 +584,13 @@ def pred_main():
     model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir,
                                    config=tf.estimator.RunConfig(session_config=config))
 
-    return model.predict(pred_input_fn)
+    import pathlib
+    pathlib.Path("exp/pascal3d/").mkdir(parents=True, exist_ok=True)
+
+    for output in model.predict(pred_input_fn):
+        with h5py.File(path.join("exp/pascal3d/",
+                                 "valid_{}.h5".format(output["index"]))) as f:
+            f["heatmaps"] = output["heatmaps"]
 
 
 def dummy_main():
@@ -583,8 +604,16 @@ def dummy_main():
     data = dataset.make_one_shot_iterator().get_next()
 
     with tf.Session() as sess:
-        return sess.run(data["labels"])
+        output = sess.run({
+         "index": data["index"],
+         "heatmaps": data["labels"]
+        })
 
+        for i in range(len(output["index"])):
+            filename = "valid_{}.h5".format(output["index"][i])
+            filepath = path.join("exp/pascal3d/", filename)
+            with h5py.File(filepath) as f:
+                f["heatmaps"] = output["heatmaps"][i]
 
 
 if __name__ == "__main__":
