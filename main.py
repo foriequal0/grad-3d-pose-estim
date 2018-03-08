@@ -441,7 +441,6 @@ from matplotlib.backends.backend_agg import FigureCanvasAgg
 
 import numpy as np
 import math
-from datetime import datetime
 
 def heatmap_thumbs(heatmaps):
     def plot(heatmaps):
@@ -464,18 +463,7 @@ def heatmap_thumbs(heatmaps):
         data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
         return data
 
-    def plots(heatmaps_batch):
-        start = datetime.now()
-        outputs = []
-        for heatmap in heatmaps_batch:
-            outputs.append(plot(heatmap))
-        arr = np.array(outputs, dtype=np.uint8)
-        end = datetime.now()
-        print("plots", end - start)
-        return arr
-
     heatmaps = to_channel_first(heatmaps)
-    # return tf.py_func(plots, [heatmaps], tf.uint8, stateful=False)
 
     def py_plot(heatmap):
         return tf.py_func(plot, [heatmap], tf.uint8, False)
