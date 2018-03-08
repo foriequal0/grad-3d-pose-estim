@@ -242,16 +242,19 @@ def augment(annot):
     return result
 
 
+def torch_batchnorm(x):
+    return tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.9)
+
 def conv_block(x, num_out):
-    x = tf.layers.batch_normalization(x)
+    x = torch_batchnorm(x)
     x = tf.nn.relu(x)
     x = tf.layers.conv2d(x, num_out / 2, kernel_size=[1, 1])
 
-    x = tf.layers.batch_normalization(x)
+    x = torch_batchnorm(x)
     x = tf.nn.relu(x)
     x = tf.layers.conv2d(x, num_out / 2, kernel_size=[3, 3], padding='SAME')
 
-    x = tf.layers.batch_normalization(x)
+    x = torch_batchnorm(x)
     x = tf.nn.relu(x)
     x = tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
     return x
@@ -296,14 +299,14 @@ def hourglass(x, n, num_out):
 
 def lin(x, num_out):
     x = tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
-    x = tf.nn.relu(tf.layers.batch_normalization(x))
+    x = tf.nn.relu(torch_batchnorm(x))
     return x
 
 
 def stacked_hourglass(x, nparts):
     # preprocess
     conv1 = tf.layers.conv2d(x, 64, [7, 7], strides=[2, 2], padding='SAME')  # 128
-    conv1 = tf.nn.relu(tf.layers.batch_normalization(conv1))
+    conv1 = tf.nn.relu(torch_batchnorm(conv1))
     r1 = residual(conv1, 128)
     pool = tf.layers.max_pooling2d(r1, [2, 2], [2, 2])  # 64
 
