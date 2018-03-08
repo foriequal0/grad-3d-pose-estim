@@ -357,7 +357,7 @@ def calc_dists(preds, labels, normalize):
         pred = x[0]
         label = x[1]
 
-        dist = tf.reduce_sum(tf.to_float(tf.pow(pred - label, 2)) / normalize)
+        dist = tf.reduce_sum(tf.norm(tf.to_float(pred - label)) / normalize)
         return tf.cond(
             tf.logical_and(tf.greater(label[0], 0), tf.greater(label[1], 0)),
             true_fn=lambda: dist,
