@@ -11,6 +11,11 @@ def get_idle_gpu():
 
 
 def cuda_visible_to_idle():
+    import os
+
+    if os.getenv("CUDA_VISIBLE_DEVICES") is not None:
+        return
+
     import shutil
     if not shutil.which("gpustat"):
         return
@@ -19,7 +24,6 @@ def cuda_visible_to_idle():
     if idle_gpu is None:
         raise Exception("No idle gpu")
 
-    import os
     os.putenv("CUDA_VISIBLE_DEVICES", str(idle_gpu))
 
     print("CUDA_VISIBLE_DEVICES:", idle_gpu, "check:", os.getenv("CUDA_VISIBLE_DEVICES"))
