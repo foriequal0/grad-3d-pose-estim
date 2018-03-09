@@ -532,10 +532,38 @@ def model_fn(features, labels, mode):
     )
 
 
+cheat_part_class = {
+    'aeroplane': {0, 1, 2, 3, 4, 5, 6, 7},
+    'bicycle': {8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18},
+    'boat': {19, 20, 21, 22, 23, 24, 25},
+    'bottle': {26, 27, 28, 29, 30, 31, 32},
+    'bus': {33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44},
+    'car': {45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56},
+    'chair': {57, 58, 59, 60, 61, 62, 63, 64, 65, 66},
+    'sofa': {67, 68, 69, 70, 71, 72, 73, 74, 75, 76},
+    'train': {77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93},
+    'tvmonitor': {94, 95, 96, 97, 98, 99, 100, 101}
+}
+
+
+def only_car(annot):
+    def _only_car(idx, part):
+        valid_part_idxs = [i for i in range(len(part)) if part[i][0] != -1]
+        idx_in_car = [idx in cheat_part_class["car"] for idx in valid_part_idxs]
+
+        if len(idx_in_car) > 0 and all(idx_in_car) :
+            return True
+        else:
+            return False
+
+    return tf.py_func(_only_car, [annot["index"], tf.to_int32(annot["part"])], stateful=False, Tout=tf.bool)
+
+
 def train_input_fn():
     train_annots = load_annots("train")
 
     dataset = train_annots["dataset"] \
+        .filter(only_car) \
         .shuffle(1024) \
         .map(make_feature_and_labels, num_parallel_calls=8) \
         .map(augment, num_parallel_calls=8) \
@@ -567,8 +595,9 @@ def pred_input_fn():
     train_annots = load_annots("valid")
 
     dataset = train_annots["dataset"] \
+        .filter(only_car) \
         .map(make_input_crop, num_parallel_calls=8) \
-        .batch(4)
+        .batch(16)
 
     data = dataset.make_one_shot_iterator().get_next()
 
@@ -597,6 +626,7 @@ def dummy_main():
     train_annots = load_annots("valid")
 
     dataset = train_annots["dataset"] \
+        .filter(only_car) \
         .map(make_feature_and_labels, num_parallel_calls=8) \
         .prefetch(16) \
         .batch(16)
