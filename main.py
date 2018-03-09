@@ -618,8 +618,9 @@ def pred_main():
 
     for output in model.predict(pred_input_fn):
         with h5py.File(path.join("exp/pascal3d/",
-                                 "valid_{}.h5".format(output["index"]))) as f:
-            f["heatmaps"] = output["heatmaps"]
+                                 "valid_{}.h5".format(output["index"])),
+                       'w') as f:
+            f["heatmaps"] = np.transpose(output["heatmaps"], (2, 0, 1))
 
 
 def dummy_main():
@@ -633,17 +634,21 @@ def dummy_main():
 
     data = dataset.make_one_shot_iterator().get_next()
 
-    with tf.Session() as sess:
-        output = sess.run({
-         "index": data["index"],
-         "heatmaps": data["labels"]
-        })
+    import pathlib
+    pathlib.Path("exp/pascal3d/").mkdir(parents=True, exist_ok=True)
 
-        for i in range(len(output["index"])):
-            filename = "valid_{}.h5".format(output["index"][i])
-            filepath = path.join("exp/pascal3d/", filename)
-            with h5py.File(filepath) as f:
-                f["heatmaps"] = output["heatmaps"][i]
+    with tf.Session() as sess:
+        while True:
+            output = sess.run({
+             "index": data["index"],
+             "heatmaps": data["labels"]
+            })
+
+            for i in range(len(output["index"])):
+                filename = "valid_{}.h5".format(output["index"][i])
+                filepath = path.join("exp/pascal3d/", filename)
+                with h5py.File(filepath, 'w') as f:
+                    f["heatmaps"] = np.transpose(output["heatmaps"][i], (2, 0, 1))
 
 
 if __name__ == "__main__":
