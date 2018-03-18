@@ -384,7 +384,7 @@ def calc_dists(preds, labels, normalize):
 
 def dist_accuracy(dists):
     thr = 0.5
-    valid = tf.not_equal(dists, -1)
+    valid = tf.greater_equal(dists, 0)
     thres = tf.less(tf.to_float(dists), tf.to_float(thr))
     total_count = tf.reduce_sum(tf.to_float(valid))
     thres_count = tf.reduce_sum(tf.to_float(tf.logical_and(thres, valid)))
@@ -454,32 +454,30 @@ import math
 
 def heatmap_thumbs(heatmaps):
     def plot(heatmaps):
-        fig = matplotlib.figure.Figure(
-            figsize=(7, 7),
-            dpi=300
-        )
+        count = int(math.ceil(math.sqrt(heatmaps.shape[0])))
+        h = heatmaps.shape[1]
+        w = heatmaps.shape[2]
 
-        cols = int(math.ceil(math.sqrt(heatmaps.shape[0])))
-
+        canvas = np.ones([int(count * h * 1.1), int(count * w * 1.1)], dtype=np.float32)
         for i in range(heatmaps.shape[0]):
-            ax = fig.add_subplot(cols, cols, i + 1)
-            ax.imshow(heatmaps[i], vmin=0, vmax=1)
+            top = int(int(i / count) * h * 1.1)
+            left = int((i % count) * w * 1.1)
 
-        if fig.canvas is None:
-            FigureCanvasAgg(fig)
-
-        fig.canvas.draw()
-        data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
-        data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-        return data
+            max = np.max(heatmaps[i])
+            min = np.min(heatmaps[i])
+            if math.fabs(max-min) < 0.01:
+                hm_out = np.zeros([w, h], dtype=np.float32)
+            else:
+                hm_out = heatmaps[i]-min
+            canvas[top:top+h, left:left+w] = hm_out
+        return canvas
 
     heatmaps = to_channel_first(heatmaps)
 
-    def py_plot(heatmap):
-        return tf.py_func(plot, [heatmap], tf.uint8, False)
+    def py_plot(heatmaps):
+        return tf.clip_by_value(tf.expand_dims(tf.py_func(plot, [heatmaps], tf.float32, False), axis=2), 0, 1)
 
-    return tf.map_fn(py_plot, heatmaps, back_prop=False, dtype=tf.uint8)
-
+    return tf.map_fn(py_plot, heatmaps, back_prop=False, dtype=tf.float32)
 
 def model_fn(features, labels, mode):
     input = features["input"]
@@ -500,15 +498,20 @@ def model_fn(features, labels, mode):
 
     tf.summary.image("image", input)
     tf.summary.image("labels", summary_label(labels))
-    # tf.summary.image("labels-thumb", heatmap_thumbs(out2))
+    tf.summary.image("labels-thumb", heatmap_thumbs(labels))
+    tf.summary.histogram("labels-hist", labels)
 
     tf.summary.image("out1", summary_label(out1))
-    tf.summary.image("out2", summary_label(out2))
+    out2_summary = summary_label(out2)
+    tf.summary.image("out2", out2_summary)
+    tf.summary.histogram("out2-summary-hist", out2_summary)
+    tf.summary.histogram("out2-hist", out2)
 
     tf.summary.image("out1-filtered", filtered_summary(labels, out1))
     tf.summary.image("out2-filtered", filtered_summary(labels, out2))
 
-    # tf.summary.image("out2-thumb", heatmap_thumbs(out2))
+    tf.summary.image("out1-thumb", heatmap_thumbs(out1))
+    tf.summary.image("out2-thumb", heatmap_thumbs(out2))
 
     # summary에 image, sum of labels, sum of out2 출력
 
