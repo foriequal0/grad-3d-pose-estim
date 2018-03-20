@@ -255,19 +255,30 @@ def augment(annot):
 def torch_batchnorm(x, training):
     return tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.9, training=training)
 
+
+def conv2d(inputs, filters, kernel_size=(1, 1), strides=(1, 1), padding='SAME', name='conv'):
+    with tf.name_scope(name):
+        # Kernel for convolution, Xavier Initialisation
+        kernel = tf.Variable(tf.contrib.layers.xavier_initializer(uniform=False)(
+            [kernel_size[0], kernel_size[1], inputs.get_shape().as_list()[3], int(filters)]), name='weights')
+        conv = tf.nn.conv2d(inputs, kernel, [1, strides[0], strides[1], 1], padding=padding, data_format='NHWC')
+        return conv
+
+
 def conv_block(x, num_out, training):
-    x = torch_batchnorm(x, training)
-    x = tf.nn.relu(x)
-    x = tf.layers.conv2d(x, num_out / 2, kernel_size=[1, 1])
+    with tf.name_scope("conv_block"):
+        x = torch_batchnorm(x, training)
+        x = tf.nn.relu(x)
+        x = conv2d(x, num_out / 2, kernel_size=[1, 1])
 
-    x = torch_batchnorm(x, training)
-    x = tf.nn.relu(x)
-    x = tf.layers.conv2d(x, num_out / 2, kernel_size=[3, 3], padding='SAME')
+        x = torch_batchnorm(x, training)
+        x = tf.nn.relu(x)
+        x = conv2d(x, num_out / 2, kernel_size=[3, 3])
 
-    x = torch_batchnorm(x, training)
-    x = tf.nn.relu(x)
-    x = tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
-    return x
+        x = torch_batchnorm(x, training)
+        x = tf.nn.relu(x)
+        x = conv2d(x, num_out, kernel_size=[1, 1])
+        return x
 
 
 def skip_layer(x, num_out):
@@ -275,39 +286,41 @@ def skip_layer(x, num_out):
     if num_in == num_out:
         return tf.identity(x)
     else:
-        return tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
+        return conv2d(x, num_out, kernel_size=[1, 1])
 
 
 def residual(x, num_out, training):
-    conv = conv_block(x, num_out, training)
-    skip = skip_layer(x, num_out)
-    return conv + skip
+    with tf.name_scope("residual"):
+        conv = conv_block(x, num_out, training)
+        skip = skip_layer(x, num_out)
+        return conv + skip
 
 
 def hourglass(x, n, num_out, training):
-    upper = residual(x, 256, training)
-    upper = residual(upper, 256, training)
-    upper = residual(upper, num_out, training)
+    with tf.name_scope("hourglass_{}".format(n)):
+        upper = residual(x, 256, training)
+        upper = residual(upper, 256, training)
+        upper = residual(upper, num_out, training)
 
-    lower = tf.layers.max_pooling2d(x, [2, 2], [2, 2])
-    lower = residual(lower, 256, training)
-    lower = residual(lower, 256, training)
-    lower = residual(lower, 256, training)
+        lower = tf.layers.max_pooling2d(x, [2, 2], [2, 2])
+        lower = residual(lower, 256, training)
+        lower = residual(lower, 256, training)
+        lower = residual(lower, 256, training)
 
-    if n > 1:
-        lower = hourglass(lower, n - 1, num_out, training)
-    else:
+        if n > 1:
+            lower = hourglass(lower, n - 1, num_out, training)
+        else:
+            lower = residual(lower, num_out, training)
+
         lower = residual(lower, num_out, training)
 
-    lower = residual(lower, num_out, training)
+        lower = tf.image.resize_nearest_neighbor(lower, tf.shape(lower)[1:3]*2)
 
-    lower = tf.image.resize_nearest_neighbor(lower, tf.shape(lower)[1:3]*2)
-
-    return lower + upper
+        return lower + upper
 
 
 def lin(x, num_out, training):
-    x = tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
+    x = conv2d(x, num_out, kernel_size=[1, 1])
     x = tf.nn.relu(torch_batchnorm(x, training))
     return x
 
@@ -315,7 +328,7 @@ def lin(x, num_out, training):
 def stacked_hourglass(x, nparts, training):
     # preprocess
     with tf.name_scope("preprocess"):
-        conv1 = tf.layers.conv2d(x, 64, [7, 7], strides=[2, 2], padding='SAME')  # 128
+        conv1 = conv2d(x, 64, [7, 7], strides=[2, 2], padding='SAME', name="256_to_128")  # 128
         conv1 = tf.nn.relu(torch_batchnorm(conv1, training))
         r1 = residual(conv1, 128, training)
         pool = tf.layers.max_pooling2d(r1, [2, 2], [2, 2])  # 64
@@ -331,12 +344,12 @@ def stacked_hourglass(x, nparts, training):
     l2 = lin(l1, 256, training)
 
     # First predicted heatmaps
-    out1 = tf.layers.conv2d(l2, nparts, [1, 1])
-    out1_ = tf.layers.conv2d(out1, 256 + 128, [1, 1])
+    out1 = conv2d(l2, nparts, [1, 1])
+    out1_ = conv2d(out1, 256 + 128, [1, 1])
 
     # Concatenate with previous linear features
     cat1 = tf.concat([l2, pool], 3)  # concat channel
-    cat1_ = tf.layers.conv2d(cat1, 256 + 128, [1, 1])
+    cat1_ = conv2d(cat1, 256 + 128, [1, 1])
 
     int1 = out1_ + cat1_
 
@@ -347,7 +360,7 @@ def stacked_hourglass(x, nparts, training):
     l4 = lin(l3, 512, training)
 
     # Output heatmaps
-    out2 = tf.layers.conv2d(l4, nparts, [1, 1])
+    out2 = conv2d(l4, nparts, [1, 1])
 
     return out1, out2
 
