@@ -252,19 +252,19 @@ def augment(annot):
     return result
 
 
-def torch_batchnorm(x):
-    return tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.9)
+def torch_batchnorm(x, training):
+    return tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.9, training=training)
 
-def conv_block(x, num_out):
-    x = torch_batchnorm(x)
+def conv_block(x, num_out, training):
+    x = torch_batchnorm(x, training)
     x = tf.nn.relu(x)
     x = tf.layers.conv2d(x, num_out / 2, kernel_size=[1, 1])
 
-    x = torch_batchnorm(x)
+    x = torch_batchnorm(x, training)
     x = tf.nn.relu(x)
     x = tf.layers.conv2d(x, num_out / 2, kernel_size=[3, 3], padding='SAME')
 
-    x = torch_batchnorm(x)
+    x = torch_batchnorm(x, training)
     x = tf.nn.relu(x)
     x = tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
     return x
@@ -278,57 +278,57 @@ def skip_layer(x, num_out):
         return tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
 
 
-def residual(x, num_out):
-    conv = conv_block(x, num_out)
+def residual(x, num_out, training):
+    conv = conv_block(x, num_out, training)
     skip = skip_layer(x, num_out)
     return conv + skip
 
 
-def hourglass(x, n, num_out):
-    upper = residual(x, 256)
-    upper = residual(upper, 256)
-    upper = residual(upper, num_out)
+def hourglass(x, n, num_out, training):
+    upper = residual(x, 256, training)
+    upper = residual(upper, 256, training)
+    upper = residual(upper, num_out, training)
 
     lower = tf.layers.max_pooling2d(x, [2, 2], [2, 2])
-    lower = residual(lower, 256)
-    lower = residual(lower, 256)
-    lower = residual(lower, 256)
+    lower = residual(lower, 256, training)
+    lower = residual(lower, 256, training)
+    lower = residual(lower, 256, training)
 
     if n > 1:
-        lower = hourglass(lower, n - 1, num_out)
+        lower = hourglass(lower, n - 1, num_out, training)
     else:
-        lower = residual(lower, num_out)
+        lower = residual(lower, num_out, training)
 
-    lower = residual(lower, num_out)
-    input_shape = x.get_shape()
-    lower = tf.image.resize_images(lower, input_shape[1:3],
-                                   tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+    lower = residual(lower, num_out, training)
+
+    lower = tf.image.resize_nearest_neighbor(lower, tf.shape(lower)[1:3]*2)
 
     return lower + upper
 
 
-def lin(x, num_out):
+def lin(x, num_out, training):
     x = tf.layers.conv2d(x, num_out, kernel_size=[1, 1])
-    x = tf.nn.relu(torch_batchnorm(x))
+    x = tf.nn.relu(torch_batchnorm(x, training))
     return x
 
 
-def stacked_hourglass(x, nparts):
+def stacked_hourglass(x, nparts, training):
     # preprocess
-    conv1 = tf.layers.conv2d(x, 64, [7, 7], strides=[2, 2], padding='SAME')  # 128
-    conv1 = tf.nn.relu(torch_batchnorm(conv1))
-    r1 = residual(conv1, 128)
-    pool = tf.layers.max_pooling2d(r1, [2, 2], [2, 2])  # 64
+    with tf.name_scope("preprocess"):
+        conv1 = tf.layers.conv2d(x, 64, [7, 7], strides=[2, 2], padding='SAME')  # 128
+        conv1 = tf.nn.relu(torch_batchnorm(conv1, training))
+        r1 = residual(conv1, 128, training)
+        pool = tf.layers.max_pooling2d(r1, [2, 2], [2, 2])  # 64
 
-    r4 = residual(pool, 128)
-    r5 = residual(r4, 128)
-    r6 = residual(r5, 256)
+        r4 = residual(pool, 128, training)
+        r5 = residual(r4, 128, training)
+        r6 = residual(r5, 256, training)
 
-    hg1 = hourglass(r6, 4, 512)
+    hg1 = hourglass(r6, 4, 512, training)
 
     # Linear layers to produce first set of predictions
-    l1 = lin(hg1, 512)
-    l2 = lin(l1, 256)
+    l1 = lin(hg1, 512, training)
+    l2 = lin(l1, 256, training)
 
     # First predicted heatmaps
     out1 = tf.layers.conv2d(l2, nparts, [1, 1])
@@ -341,10 +341,10 @@ def stacked_hourglass(x, nparts):
     int1 = out1_ + cat1_
 
     # Second hourglass
-    hg2 = hourglass(int1, 4, 512)
+    hg2 = hourglass(int1, 4, 512, training)
     # Linear layers to produce predictions again
-    l3 = lin(hg2, 512)
-    l4 = lin(l3, 512)
+    l3 = lin(hg2, 512, training)
+    l4 = lin(l3, 512, training)
 
     # Output heatmaps
     out2 = tf.layers.conv2d(l4, nparts, [1, 1])
@@ -481,7 +481,7 @@ def heatmap_thumbs(heatmaps):
 
 def model_fn(features, labels, mode):
     input = features["input"]
-    out1, out2 = stacked_hourglass(features["input"], features["ref"]["nparts"])
+    out1, out2 = stacked_hourglass(features["input"], features["ref"]["nparts"], mode == tf.estimator.ModeKeys.TRAIN)
 
     if mode == tf.estimator.ModeKeys.PREDICT:
         return tf.estimator.EstimatorSpec(mode, predictions={
