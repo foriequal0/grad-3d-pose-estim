@@ -457,11 +457,6 @@ def filtered_summary(groundtruth, heatmap):
     summary = tf.map_fn(filter_sum, stacked, back_prop=False) # (batch, H, W, channels)
     return summary
 
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.figure
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-
 import numpy as np
 import math
 
@@ -470,6 +465,9 @@ def heatmap_thumbs(heatmaps):
         count = int(math.ceil(math.sqrt(heatmaps.shape[0])))
         h = heatmaps.shape[1]
         w = heatmaps.shape[2]
+
+        max = np.max(heatmaps)
+        min = np.min(heatmaps)
 
         canvas = np.ones([int(count * h * 1.1), int(count * w * 1.1)], dtype=np.float32)
         for i in range(heatmaps.shape[0]):
@@ -481,7 +479,7 @@ def heatmap_thumbs(heatmaps):
             if math.fabs(max-min) < 0.01:
                 hm_out = np.zeros([w, h], dtype=np.float32)
             else:
-                hm_out = heatmaps[i]-min
+                hm_out = (heatmaps[i]-min)/(max-min)
             canvas[top:top+h, left:left+w] = hm_out
         return canvas
 
@@ -578,14 +576,17 @@ def only_car(annot):
 def train_input_fn():
     train_annots = load_annots("train")
 
+    BATCH = 4
+    STEPS = 4000
+
     dataset = train_annots["dataset"] \
-        .filter(only_car) \
-        .shuffle(1024) \
+        .take(BATCH * STEPS) \
+        .repeat() \
+        .shuffle(BATCH * STEPS) \
         .map(make_feature_and_labels, num_parallel_calls=8) \
         .map(augment, num_parallel_calls=8) \
-        .repeat() \
         .prefetch(16) \
-        .batch(16)
+        .batch(4)
 
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
@@ -602,16 +603,14 @@ def train_main():
     # https://developers.googleblog.com/2017/09/introducing-tensorflow-datasets.html
     model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir,
                                    config=tf.estimator.RunConfig(session_config=config))
-    for epoch in range(100):
-        print("epoch ", epoch)
-        model.train(train_input_fn, steps=1000)
+
+    model.train(train_input_fn, steps=4000 * 100)
 
 
 def pred_input_fn():
     train_annots = load_annots("valid")
 
     dataset = train_annots["dataset"] \
-        .filter(only_car) \
         .map(make_input_crop, num_parallel_calls=8) \
         .batch(16)
 
@@ -643,7 +642,6 @@ def dummy_main():
     train_annots = load_annots("valid")
 
     dataset = train_annots["dataset"] \
-        .filter(only_car) \
         .map(make_feature_and_labels, num_parallel_calls=8) \
         .prefetch(16) \
         .batch(16)
