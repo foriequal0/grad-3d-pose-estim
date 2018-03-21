@@ -522,8 +522,11 @@ def model_fn(features, labels, mode):
         })
 
     loss = tf.losses.mean_squared_error([labels, labels], [out1, out2])
-    train_op = tf.train.RMSPropOptimizer(2.5e-4) \
-        .minimize(loss, global_step=tf.train.get_global_step())
+    # loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=[out1, out2], labels=[labels, labels]))
+    update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    with tf.control_dependencies(update_ops):
+        train_op = tf.train.RMSPropOptimizer(2.5e-4) \
+            .minimize(loss, global_step=tf.train.get_global_step())
 
     tf.summary.scalar("accuracy", heatmapAccuracy(out2, labels))
     tf.summary.scalar("loss", loss)
