@@ -427,27 +427,50 @@ def summary_label(label):
 
 
 def filtered_summary(groundtruth, heatmap):
-    def filter(accum, stacked):
+    def filter_hm(accum, stacked):
         gt = stacked[0]
         hm = stacked[1]
         max = tf.reduce_max(hm)
-        hm_out = tf.pow(hm / max, 2) / 2
-        hm_out = tf.expand_dims(hm_out, axis=2) # add channel
+        min = tf.reduce_min(hm)
+        hm = tf.pow((hm-min) / (max-min), 2) / 2
+        hm_out = tf.expand_dims(hm, axis=2) # add channel
+
+        return tf.cond(
+            tf.not_equal(tf.reduce_sum(gt), 0),
+            true_fn=lambda: accum + hm_out,
+            false_fn=lambda: accum,
+        )
+
+    def filter_pred(accum, stacked):
+        gt = stacked[0]
+        hm = stacked[1]
+        max = tf.reduce_max(hm)
 
         zeros =  tf.zeros(gt.get_shape())
         hm_pred = tf.to_float(tf.equal(hm, max))
         hm_pred = tf.stack([hm_pred, zeros, zeros], axis=2)
         return tf.cond(
             tf.not_equal(tf.reduce_sum(gt), 0),
-            true_fn=lambda: accum + hm_out + hm_pred,
+            true_fn=lambda: accum + hm_pred,
             false_fn=lambda: accum,
         )
 
     def filter_sum(channels):
         gt_shape = channels[0][0].get_shape()
-        return tf.foldl(filter, channels,
+        hm = tf.foldl(filter_hm, channels,
                         initializer=tf.zeros([gt_shape[0], gt_shape[1], 3]),
                         back_prop=False)
+        hm = tf.cond(
+            (tf.reduce_max(hm) - tf.reduce_min(hm)) > 0.01,
+            true_fn = lambda: (hm - tf.reduce_min(hm))/(tf.reduce_max(hm) - tf.reduce_min(hm)),
+            false_fn = lambda: tf.zeros(tf.shape(hm))
+        )
+
+        pred = tf.foldl(filter_pred, channels,
+                      initializer=tf.zeros([gt_shape[0], gt_shape[1], 3]),
+                      back_prop=False)
+
+        return tf.clip_by_value(hm + pred, clip_value_min=0, clip_value_max=1)
 
     # (batch, H, W, chan) -> (batch, chan, H, W)
     channel_first_groundtruth = to_channel_first(groundtruth)
@@ -474,8 +497,6 @@ def heatmap_thumbs(heatmaps):
             top = int(int(i / count) * h * 1.1)
             left = int((i % count) * w * 1.1)
 
-            max = np.max(heatmaps[i])
-            min = np.min(heatmaps[i])
             if math.fabs(max-min) < 0.01:
                 hm_out = np.zeros([w, h], dtype=np.float32)
             else:
