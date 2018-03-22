@@ -36,7 +36,7 @@ import h5py
 import tensorflow as tf
 from stacked_hourglass.opts import opts
 
-tf.logging.set_verbosity(tf.logging.INFO)
+tf.logging.set_verbosity(tf.logging.DEBUG)
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 
@@ -211,13 +211,14 @@ def augment(annot):
 
     def resize_and_rotate(img, res, r, s):
         img = tf.image.resize_images(
-            img, tf.to_int32(tf.to_float([res, res]) * s)
+            img, tf.to_int32(tf.to_float([res, res]) * s),
+            method=tf.image.ResizeMethod.BICUBIC
         )
         # pad not to clip corners. cheap and fast math.sqrt(2)
         img = tf.image.resize_image_with_crop_or_pad(
             img, int(res * math.sqrt(2)), int(res * math.sqrt(2))
         )
-        img = tf.contrib.image.rotate(img, r)
+        img = tf.contrib.image.rotate(img, r, interpolation='BILINEAR')
         img = tf.image.resize_image_with_crop_or_pad(
             img, res, res
         )
@@ -258,11 +259,7 @@ def torch_batchnorm(x, training):
 
 def conv2d(inputs, filters, kernel_size=(1, 1), strides=(1, 1), padding='SAME', name='conv'):
     with tf.name_scope(name):
-        # Kernel for convolution, Xavier Initialisation
-        kernel = tf.Variable(tf.contrib.layers.xavier_initializer(uniform=False)(
-            [kernel_size[0], kernel_size[1], inputs.get_shape().as_list()[3], int(filters)]), name='weights')
-        conv = tf.nn.conv2d(inputs, kernel, [1, strides[0], strides[1], 1], padding=padding, data_format='NHWC')
-        return conv
+        return tf.layers.conv2d(inputs, filters, kernel_size=kernel_size, strides=strides, padding=padding)
 
 
 def conv_block(x, num_out, training):
@@ -284,7 +281,7 @@ def conv_block(x, num_out, training):
 def skip_layer(x, num_out):
     num_in = x.get_shape()[3]
     if num_in == num_out:
-        return tf.identity(x)
+        return x
     else:
         return conv2d(x, num_out, kernel_size=[1, 1])
 
@@ -297,12 +294,13 @@ def residual(x, num_out, training):
 
 
 def hourglass(x, n, num_out, training):
-    with tf.name_scope("hourglass_{}".format(n)):
+    with tf.name_scope("hourglass{}".format(n)):
         upper = residual(x, 256, training)
         upper = residual(upper, 256, training)
         upper = residual(upper, num_out, training)
 
         lower = tf.layers.max_pooling2d(x, [2, 2], [2, 2])
+
         lower = residual(lower, 256, training)
         lower = residual(lower, 256, training)
         lower = residual(lower, 256, training)
@@ -315,14 +313,14 @@ def hourglass(x, n, num_out, training):
         lower = residual(lower, num_out, training)
 
         lower = tf.image.resize_nearest_neighbor(lower, tf.shape(lower)[1:3]*2)
-
-        return lower + upper
+        return upper + lower
 
 
 def lin(x, num_out, training):
-    x = conv2d(x, num_out, kernel_size=[1, 1])
-    x = tf.nn.relu(torch_batchnorm(x, training))
-    return x
+    with tf.name_scope("lin"):
+        x = conv2d(x, num_out, kernel_size=[1, 1])
+        x = tf.nn.relu(torch_batchnorm(x, training))
+        return x
 
 
 def stacked_hourglass(x, nparts, training):
@@ -339,13 +337,14 @@ def stacked_hourglass(x, nparts, training):
 
     hg1 = hourglass(r6, 4, 512, training)
 
-    # Linear layers to produce first set of predictions
-    l1 = lin(hg1, 512, training)
-    l2 = lin(l1, 256, training)
+    with tf.name_scope("out1"):
+        # Linear layers to produce first set of predictions
+        l1 = lin(hg1, 512, training)
+        l2 = lin(l1, 256, training)
 
-    # First predicted heatmaps
-    out1 = conv2d(l2, nparts, [1, 1])
-    out1_ = conv2d(out1, 256 + 128, [1, 1])
+        # First predicted heatmaps
+        out1 = conv2d(l2, nparts, [1, 1])
+        out1_ = conv2d(out1, 256 + 128, [1, 1])
 
     # Concatenate with previous linear features
     cat1 = tf.concat([l2, pool], 3)  # concat channel
@@ -355,12 +354,14 @@ def stacked_hourglass(x, nparts, training):
 
     # Second hourglass
     hg2 = hourglass(int1, 4, 512, training)
-    # Linear layers to produce predictions again
-    l3 = lin(hg2, 512, training)
-    l4 = lin(l3, 512, training)
 
-    # Output heatmaps
-    out2 = conv2d(l4, nparts, [1, 1])
+    with tf.name_scope("out2"):
+        # Linear layers to produce predictions again
+        l3 = lin(hg2, 512, training)
+        l4 = lin(l3, 512, training)
+
+        # Output heatmaps
+        out2 = conv2d(l4, nparts, [1, 1])
 
     return out1, out2
 
@@ -511,8 +512,10 @@ def heatmap_thumbs(heatmaps):
 
     return tf.map_fn(py_plot, heatmaps, back_prop=False, dtype=tf.float32)
 
+
 def model_fn(features, labels, mode):
     input = features["input"]
+
     out1, out2 = stacked_hourglass(features["input"], features["ref"]["nparts"], mode == tf.estimator.ModeKeys.TRAIN)
 
     if mode == tf.estimator.ModeKeys.PREDICT:
@@ -524,9 +527,11 @@ def model_fn(features, labels, mode):
     loss = tf.losses.mean_squared_error([labels, labels], [out1, out2])
     # loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=[out1, out2], labels=[labels, labels]))
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
+    print(update_ops)
+    global_step= tf.train.get_global_step()
+    optimizer = tf.train.RMSPropOptimizer(2.5e-4)
     with tf.control_dependencies(update_ops):
-        train_op = tf.train.RMSPropOptimizer(2.5e-4) \
-            .minimize(loss, global_step=tf.train.get_global_step())
+        train_op = optimizer.minimize(loss, global_step=global_step)
 
     tf.summary.scalar("accuracy", heatmapAccuracy(out2, labels))
     tf.summary.scalar("loss", loss)
@@ -606,6 +611,7 @@ def train_input_fn():
     dataset = train_annots["dataset"] \
         .take(BATCH * STEPS) \
         .repeat() \
+        .filter(only_car) \
         .shuffle(BATCH * STEPS) \
         .map(make_feature_and_labels, num_parallel_calls=8) \
         .map(augment, num_parallel_calls=8) \
