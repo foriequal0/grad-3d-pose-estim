@@ -211,14 +211,13 @@ def augment(annot):
 
     def resize_and_rotate(img, res, r, s):
         img = tf.image.resize_images(
-            img, tf.to_int32(tf.to_float([res, res]) * s),
-            method=tf.image.ResizeMethod.BICUBIC
+            img, tf.to_int32(tf.to_float([res, res]) * s)
         )
         # pad not to clip corners. cheap and fast math.sqrt(2)
         img = tf.image.resize_image_with_crop_or_pad(
             img, int(res * math.sqrt(2)), int(res * math.sqrt(2))
         )
-        img = tf.contrib.image.rotate(img, r, interpolation='BILINEAR')
+        img = tf.contrib.image.rotate(img, r)
         img = tf.image.resize_image_with_crop_or_pad(
             img, res, res
         )
