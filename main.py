@@ -253,12 +253,24 @@ def augment(annot):
 
 
 def torch_batchnorm(x, training):
-    return tf.layers.batch_normalization(x, epsilon=1e-5, momentum=0.9, training=training)
+    return tf.layers.batch_normalization(
+        x, epsilon=1e-5, momentum=0.9, training=training,
+        gamma_initializer=tf.random_uniform_initializer(0, 1),
+        beta_initializer=tf.zeros_initializer(),
+        moving_mean_initializer=tf.zeros_initializer(),
+        moving_variance_initializer=tf.ones_initializer()
+    )
 
 
 def conv2d(inputs, filters, kernel_size=(1, 1), strides=(1, 1), padding='SAME', name='conv'):
     with tf.name_scope(name):
-        return tf.layers.conv2d(inputs, filters, kernel_size=kernel_size, strides=strides, padding=padding)
+        stdv = 1/math.sqrt(kernel_size[0]*kernel_size[1]*filters)
+
+        return tf.layers.conv2d(
+            inputs, filters, kernel_size=kernel_size, strides=strides, padding=padding,
+            kernel_initializer=tf.random_uniform_initializer(-stdv, stdv),
+            bias_initializer=tf.random_uniform_initializer(-stdv, stdv),
+        )
 
 
 def conv_block(x, num_out, training):
