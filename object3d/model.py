@@ -3,7 +3,7 @@ import math
 
 def torch_batchnorm(x, training):
     return tf.layers.batch_normalization(
-        x, epsilon=1e-5, momentum=0.9, training=training,
+        x, epsilon=1e-5, momentum=0.9, training=training, axis=1,
         gamma_initializer=tf.random_uniform_initializer(0, 1),
         beta_initializer=tf.zeros_initializer(),
         moving_mean_initializer=tf.zeros_initializer(),
@@ -16,7 +16,7 @@ def conv2d(inputs, filters, kernel_size=(1, 1), strides=(1, 1), padding='SAME', 
         stdv = 1/math.sqrt(kernel_size[0]*kernel_size[1]*filters)
 
         return tf.layers.conv2d(
-            inputs, filters, kernel_size=kernel_size, strides=strides, padding=padding,
+            inputs, filters, kernel_size=kernel_size, strides=strides, padding=padding, data_format='channels_first',
             kernel_initializer=tf.random_uniform_initializer(-stdv, stdv),
             bias_initializer=tf.random_uniform_initializer(-stdv, stdv),
         )
@@ -39,7 +39,7 @@ def conv_block(x, num_out, training):
 
 
 def skip_layer(x, num_out):
-    num_in = x.get_shape()[3]
+    num_in = x.get_shape()[1]
     if num_in == num_out:
         return x
     else:
@@ -59,7 +59,7 @@ def hourglass(x, n, num_out, training):
         upper = residual(upper, 256, training)
         upper = residual(upper, num_out, training)
 
-        lower = tf.layers.max_pooling2d(x, [2, 2], [2, 2])
+        lower = tf.layers.max_pooling2d(x, [2, 2], [2, 2], data_format='channels_first')
 
         lower = residual(lower, 256, training)
         lower = residual(lower, 256, training)
@@ -72,7 +72,7 @@ def hourglass(x, n, num_out, training):
 
         lower = residual(lower, num_out, training)
 
-        lower = tf.image.resize_nearest_neighbor(lower, tf.shape(lower)[1:3]*2)
+        lower = tf.keras.layers.UpSampling2D(2, data_format='channels_first').apply(lower)
         return upper + lower
 
 
@@ -83,13 +83,16 @@ def lin(x, num_out, training):
         return x
 
 
+from . import util
 def stacked_hourglass(x, nparts, training):
+    x = util.to_channel_first(x)
     # preprocess
     with tf.name_scope("preprocess"):
         conv1 = conv2d(x, 64, [7, 7], strides=[2, 2], padding='SAME', name="256_to_128")  # 128
         conv1 = tf.nn.relu(torch_batchnorm(conv1, training))
         r1 = residual(conv1, 128, training)
-        pool = tf.layers.max_pooling2d(r1, [2, 2], [2, 2])  # 64
+
+        pool = tf.layers.max_pooling2d(r1, [2, 2], [2, 2], data_format='channels_first')  # 64
 
         r4 = residual(pool, 128, training)
         r5 = residual(r4, 128, training)
@@ -107,7 +110,7 @@ def stacked_hourglass(x, nparts, training):
         out1_ = conv2d(out1, 256 + 128, [1, 1])
 
     # Concatenate with previous linear features
-    cat1 = tf.concat([l2, pool], 3)  # concat channel
+    cat1 = tf.concat([l2, pool], 1)  # concat channel
     cat1_ = conv2d(cat1, 256 + 128, [1, 1])
 
     int1 = out1_ + cat1_
@@ -123,4 +126,5 @@ def stacked_hourglass(x, nparts, training):
         # Output heatmaps
         out2 = conv2d(l4, nparts, [1, 1])
 
-    return out1, out2
+    o = util.to_channel_last(out1)
+    return o, o
