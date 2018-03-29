@@ -29,7 +29,12 @@ def model_fn(features, labels, mode):
     global_step= tf.train.get_global_step()
 
     from . import torch_rmsprop
-    optimizer = torch_rmsprop.RMSPropOptimizer(2.5e-4, use_locking=True)
+    if opts.optimizer == 'torch':
+        optimizer = torch_rmsprop.RMSPropOptimizer(2.5e-4, use_locking=True)
+    elif opts.optimizer == 'tf':
+        optimizer = tf.train.RMSPropOptimizer(2.5e-4, epsilon=1e-16, decay=0.99, use_locking=True)
+    else:
+        raise ValueError("optimizer {} is invalid".format(opts.optimizer))
     with tf.control_dependencies(update_ops):
         train_op = optimizer.minimize(loss, global_step=global_step)
 
@@ -76,20 +81,21 @@ def model_fn(features, labels, mode):
     )
 
 
+BATCH = opts.train_batch
+STEPS = opts.train_iters
+INPUTS = STEPS * 4
+
 def train_input_fn():
     train_annots = loader.load_annots("train")
 
-    BATCH = 4
-    STEPS = 4000
-
     dataset = train_annots["dataset"] \
-        .take(BATCH * STEPS) \
+        .take(INPUTS) \
         .repeat() \
-        .shuffle(BATCH * STEPS) \
+        .shuffle(INPUTS) \
         .map(loader.make_input_and_labels, num_parallel_calls=8) \
         .map(loader.augment, num_parallel_calls=8) \
-        .prefetch(16) \
-        .batch(4)
+        .prefetch(BATCH*2) \
+        .batch(BATCH)
 
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
@@ -110,7 +116,7 @@ def train_main():
     model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir,
                                    config=tf.estimator.RunConfig(session_config=config))
 
-    model.train(train_input_fn, steps=4000 * 100)
+    model.train(train_input_fn, steps=STEPS * 4 / BATCH * 100)
 
 
 def pred_input_fn():
