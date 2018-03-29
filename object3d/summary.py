@@ -131,7 +131,11 @@ def heatmap_thumbs(heatmaps):
         max = np.max(heatmaps)
         min = np.min(heatmaps)
 
-        canvas = np.ones([int(count * h * 1.1), int(count * w * 1.1)], dtype=np.float32)
+        canvas = np.ones([int(count * h * 1.1), int((count+1) * w * 1.1)], dtype=np.float32)
+
+        left = int((count) * w * 1.1)
+        bar_h = int((count) * h * 1.1)
+        canvas[0:bar_h, left:left+w] = np.tile(np.expand_dims(np.arange(bar_h, dtype=np.float32)/bar_h, 1), (1, w))
         for i in range(heatmaps.shape[0]):
             top = int(int(i / count) * h * 1.1)
             left = int((i % count) * w * 1.1)
@@ -139,8 +143,10 @@ def heatmap_thumbs(heatmaps):
             if math.fabs(max-min) < 0.01:
                 hm_out = np.zeros([w, h], dtype=np.float32)
             else:
-                hm_out = (heatmaps[i]-min)/(max-min)
+                hm_out = heatmaps[i]
             canvas[top:top+h, left:left+w] = hm_out
+        canvas = (canvas - min) / (max - min)
+        canvas = np.clip(canvas, 0, 1, out=canvas)
         return canvas
 
     heatmaps = util.to_channel_first(heatmaps)
