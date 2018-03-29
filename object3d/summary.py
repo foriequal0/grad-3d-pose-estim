@@ -73,12 +73,11 @@ def filtered_summary(groundtruth, heatmap):
         hm = stacked[1]
         max = tf.reduce_max(hm)
         min = tf.reduce_min(hm)
-        hm = tf.pow((hm-min) / (max-min), 2) / 2
-        hm_out = tf.expand_dims(hm, axis=2) # add channel
+        hm = tf.pow((hm-min) / (max-min), 2) / 2 # exaggerate
 
         return tf.cond(
             tf.not_equal(tf.reduce_sum(gt), 0),
-            true_fn=lambda: accum + hm_out,
+            true_fn=lambda: accum + hm,
             false_fn=lambda: accum,
         )
 
@@ -87,9 +86,7 @@ def filtered_summary(groundtruth, heatmap):
         hm = stacked[1]
         max = tf.reduce_max(hm)
 
-        zeros =  tf.zeros(gt.get_shape())
         hm_pred = tf.to_float(tf.equal(hm, max))
-        hm_pred = tf.stack([hm_pred, zeros, zeros], axis=2)
         return tf.cond(
             tf.not_equal(tf.reduce_sum(gt), 0),
             true_fn=lambda: accum + hm_pred,
@@ -98,20 +95,23 @@ def filtered_summary(groundtruth, heatmap):
 
     def filter_sum(channels):
         gt_shape = channels[0][0].get_shape()
-        hm = tf.foldl(filter_hm, channels,
-                        initializer=tf.zeros([gt_shape[0], gt_shape[1], 3]),
-                        back_prop=False)
+        zeros = tf.zeros(gt_shape[0:2])
+        hm = tf.foldl(filter_hm, channels, initializer=zeros, back_prop=False)
+        # regularize
         hm = tf.cond(
             (tf.reduce_max(hm) - tf.reduce_min(hm)) > 0.01,
             true_fn = lambda: (hm - tf.reduce_min(hm))/(tf.reduce_max(hm) - tf.reduce_min(hm)),
             false_fn = lambda: tf.zeros(tf.shape(hm))
         )
+        hm_ = tf.stack([hm, hm, hm], axis=2)
 
-        pred = tf.foldl(filter_pred, channels,
-                      initializer=tf.zeros([gt_shape[0], gt_shape[1], 3]),
-                      back_prop=False)
+        pred = tf.foldl(filter_pred, channels, initializer=zeros, back_prop=False)
+        pred_ = tf.stack([pred, zeros, zeros], axis=2)
 
-        return tf.clip_by_value(hm + pred, clip_value_min=0, clip_value_max=1)
+        cond = tf.expand_dims(tf.to_float(tf.logical_and(hm > 0.5, pred > 0.001)), axis=2)
+        out = cond * (2 * hm_ * pred_) + (1-cond) * (1 - 2 * (1 - hm_) * (1 - pred_))
+
+        return tf.clip_by_value(out, clip_value_min=0, clip_value_max=1)
 
     # (batch, H, W, chan) -> (batch, chan, H, W)
     channel_first_groundtruth = util.to_channel_first(groundtruth)
