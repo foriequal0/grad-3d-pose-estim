@@ -126,5 +126,4 @@ def stacked_hourglass(x, nparts, training):
         # Output heatmaps
         out2 = conv2d(l4, nparts, [1, 1])
 
-    o = util.to_channel_last(out1)
-    return o, o
+    return util.to_channel_last(out1), util.to_channel_last(out2)

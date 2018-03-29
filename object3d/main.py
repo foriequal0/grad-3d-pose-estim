@@ -27,7 +27,9 @@ def model_fn(features, labels, mode):
     # loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(logits=[out1, out2], labels=[labels, labels]))
     update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
     global_step= tf.train.get_global_step()
-    optimizer = tf.train.RMSPropOptimizer(2.5e-4)
+
+    from . import torch_rmsprop
+    optimizer = torch_rmsprop.RMSPropOptimizer(2.5e-4, use_locking=True)
     with tf.control_dependencies(update_ops):
         train_op = optimizer.minimize(loss, global_step=global_step)
 
