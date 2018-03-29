@@ -7,12 +7,6 @@ import tensorflow as tf
 
 
 class RMSPropOptimizer(optimizer.Optimizer):
-    """Optimizer that implements the Adamax algorithm.
-    See [Kingma et. al., 2014](http://arxiv.org/abs/1412.6980)
-    ([pdf](http://arxiv.org/pdf/1412.6980.pdf)).
-    @@__init__
-    """
-
     def __init__(self, learning_rate=1e-2, alpha=0.99, epsilon=1e-8, use_locking=False, name="RMSProp"):
         super(RMSPropOptimizer, self).__init__(use_locking, name)
         self._lr = learning_rate
