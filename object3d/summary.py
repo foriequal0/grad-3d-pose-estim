@@ -73,7 +73,7 @@ def filtered_summary(groundtruth, heatmap):
         hm = stacked[1]
         max = tf.reduce_max(hm)
         min = tf.reduce_min(hm)
-        hm = tf.pow((hm-min) / (max-min), 2) / 2 # exaggerate
+        hm = tf.pow((hm-min) / (max-min), 2) # exaggerate
 
         return tf.cond(
             tf.not_equal(tf.reduce_sum(gt), 0),

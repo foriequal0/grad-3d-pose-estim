@@ -81,21 +81,17 @@ def model_fn(features, labels, mode):
     )
 
 
-BATCH = opts.train_batch
-STEPS = opts.train_iters
-INPUTS = STEPS * 4
-
 def train_input_fn():
     train_annots = loader.load_annots("train")
-
+    data_size = opts.train_iters * opts.train_batch
     dataset = train_annots["dataset"] \
-        .take(INPUTS) \
+        .take(data_size) \
         .repeat() \
-        .shuffle(INPUTS) \
+        .shuffle(data_size) \
         .map(loader.make_input_and_labels, num_parallel_calls=8) \
         .map(loader.augment, num_parallel_calls=8) \
-        .prefetch(BATCH*2) \
-        .batch(BATCH)
+        .prefetch(opts.train_batch*2) \
+        .batch(opts.train_batch)
 
     data = dataset.make_one_shot_iterator().get_next()
     # batch channel width height
@@ -116,7 +112,7 @@ def train_main():
     model = tf.estimator.Estimator(model_fn, model_dir=opts.model_dir,
                                    config=tf.estimator.RunConfig(session_config=config))
 
-    model.train(train_input_fn, steps=STEPS * 4 / BATCH * 100)
+    model.train(train_input_fn, steps=opts.train_iters * opts.n_epochs)
 
 
 def pred_input_fn():
