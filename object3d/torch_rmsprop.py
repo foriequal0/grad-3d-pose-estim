@@ -24,7 +24,6 @@ class RMSPropOptimizer(optimizer.Optimizer):
         self._epsilon_t = ops.convert_to_tensor(self._epsilon, name="epsilon")
 
     def _create_slots(self, var_list):
-        # Create slots for the first and second moments.
         for v in var_list:
             self._zeros_slot(v, "m", self._name)
 

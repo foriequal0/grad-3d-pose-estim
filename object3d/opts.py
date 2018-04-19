@@ -13,7 +13,7 @@ _general.add_argument("--log-dir", default="./log/{exp-id}")
 _general.add_argument("--manual-seed", default=-1, type=int)
 
 _training = parser.add_argument_group("Training options")
-_training.add_argument("--optimizer", choices=["tf", "torch"])
+_training.add_argument("--optimizer", default="torch", choices=["tf", "torch"])
 _training.add_argument("--n-epochs", default=100, type=int)
 _training.add_argument("--train-iters", default=4000, type=int)
 _training.add_argument("--train-batch", default=4, type=int)

@@ -11,6 +11,7 @@ import object3d.main as main
 from object3d.opts import opts
 
 if __name__ == "__main__":
+    print("MODE: ", opts.mode)
     if opts.mode == "train":
         main.train_main()
     elif opts.mode == "pred":
