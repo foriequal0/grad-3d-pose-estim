@@ -14,6 +14,8 @@ tensorflow = ">=1.4,<1.5"
 scipy = "*"
 numpy = "*"
 "h5py" = "*"
+pymanopt = { git = "https://github.com/pymanopt/pymanopt", ref = "79d12fe564ec586ed17e76f359009f981d8fc356" }
+autograd = "*"
 
 
 [dev-packages]
