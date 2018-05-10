@@ -16,6 +16,8 @@ numpy = "*"
 "h5py" = "*"
 pymanopt = { git = "https://github.com/pymanopt/pymanopt", ref = "79d12fe564ec586ed17e76f359009f981d8fc356" }
 autograd = "*"
+imageio = "*"
+scikit-image = "*"
 
 
 [dev-packages]
