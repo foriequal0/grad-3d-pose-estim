@@ -11,6 +11,7 @@ from skimage.transform import resize
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import matplotlib.cm
+from mpl_toolkits.mplot3d import Axes3D
 mpl.use('WXAgg')
 
 def load(path):
@@ -178,7 +179,7 @@ def estimateC_weighted(W, R, B, D, lam):
         D[2*i, 2*i] = d[i]
         D[2*i+1, 2*i+1] = d[i]
 
-    y = W.flatten('F')
+    y = np.expand_dims(W.flatten('F'), 1)
     X = np.zeros([2 * P, K])
     for k in range(K):
         RBk = R @ B[3 * k:3 * (k + 1), :]
@@ -259,11 +260,11 @@ def PoseFromKpts_WP(W, d, weight=None, verb=True, lam = 1, tol=1e-3):
 
         if np.prod(np.shape(pc)) == 0:
             C0 = estimateC_weighted(W2fit, R, B, D, 1e-3)
-            S = C0 * B # @?
+            S = C0 * B
         else:
             C0 = estimateC_weighted(W2fit - R @ np.kron(C, np.eye(3)) @ pc, R, B, D, 1e-3)
-            C = estimateC_weighted(W2fit - R @ C0 @ B, R, pc, D, lam)
-            S = C0 * B + np.kron(C, np.eye(3)) @ pc # @?
+            C = estimateC_weighted(W2fit - R * C0 @ B, R, pc, D, lam)
+            S = C0 * B + np.kron(C, np.eye(3)) @ pc
         fvaltml = fval
         fval = 0.5 * np.power(np.linalg.norm((W2fit - R @ S) @ np.sqrt(D), 'fro'), 2) + 0.5 * np.power(np.linalg.norm(C), 2)
 
@@ -430,6 +431,50 @@ def cropImage(im, center, scale):
     im1 = resize(im1, [200, 200])
     return im1
 
+def vis_wp(img, opt, heatmap, center, scale, cad, d):
+    # Some limiting conditions on Wedg
+    from matplotlib.collections import PolyCollection
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    img_crop = cropImage(img, center, scale)
+    nplot = 3
+    h = plt.figure(None, (nplot, 1))
+
+    def add_axes(left):
+        a = h.add_axes(((left - nplot/2+0.5)/nplot, 0, 1, 1))
+        a.xaxis.set_visible(False)
+        a.yaxis.set_visible(False)
+        return a
+    a = add_axes(0)
+    a.imshow(img_crop)
+
+    a = add_axes(1)
+    response = np.sum(heatmap, axis=0)
+    max_value = np.max(response)
+    jet = mpl.cm.get_cmap('jet')
+    jet_img = jet(response/max_value)[:,:,0:3]
+    jet_img = resize(jet_img, [200,200])
+    a.imshow(jet_img * 0.5 + img_crop * 0.5)
+
+    S_wp = opt['R'] @ opt['S'] + np.append(opt['T'], [[0]], axis=0)
+    model, _, _, _ = fullShape(S_wp, cad)
+
+    faces = model["faces"].astype(int) - 1
+    vertices = model["vertices"]
+
+    mesh2d = vertices[:, 0:2] * 200 / np.size(heatmap, 1)
+
+    a = add_axes(2)
+    a.imshow(img_crop)
+    a.hold()
+    a.add_collection(
+        PolyCollection(
+            [mesh2d[face] for face in faces],
+            alpha=0.4)
+    )
+
+    plt.show()
+
 def vis_fp(img, opt_fp, opt_wp, heatmap, center, scale, K, cad):
     # Some limiting conditions on Wedg
     from matplotlib.collections import PolyCollection
@@ -557,5 +602,8 @@ def pascal3d_eval():
         W_hp, score = findWmax(hm)
 
         output_wp = PoseFromKpts_WP(W_hp + 1, d, weight=score, verb=True, lam=1)
+
+        img = imread(path.join(datapath, "../images/{}.jpg".format(imgname)))
+        vis_wp(img, output_wp, hm, center, scale, cad.__dict__, d)
 
 pascal3d_eval()
