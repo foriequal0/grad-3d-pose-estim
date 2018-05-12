@@ -314,7 +314,8 @@ def composeShape(B, C):
     k = np.size(B, 0) // 3
 
     B = np.reshape(B.T, [3 * p, k])
-    S = np.reshape(B @ C.T, [p, 3*F])
+    S = np.reshape(B @ C.T, [p, 3*f])
+    return S
 
 
 def PoseFromKpts_FP(W, d, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
