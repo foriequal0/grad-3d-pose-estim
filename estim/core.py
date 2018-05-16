@@ -4,7 +4,8 @@ from pymanopt import Problem
 from pymanopt.manifolds import Stiefel
 from pymanopt.solvers import TrustRegions
 
-from .util import mrdivide, centralize, reshapeS
+from .util import mldivide, mrdivide, centralize, reshapeS
+from .linesearch import linesearch, ChangeDetect
 
 def prox_2norm(Z, lam):
     [U,W,V] = np.linalg.svd(Z, full_matrices=False)
@@ -104,7 +105,7 @@ def estimateR_weighted(S, W, D, R0):
         return g
 
     manifold = Stiefel(n, p)
-    problem = Problem(manifold, cost=cost, grad=grad)
+    problem = Problem(manifold, cost=cost, grad=grad, verbosity=0)
     solver = TrustRegions(maxiter=10, mingradnorm=1e-3)
     np.set_printoptions(precision=4, suppress=True)
     X = solver.solve(problem, X0)
@@ -286,5 +287,137 @@ def PoseFromKpts_FP(W, d, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
         "R": R,
         "C": C,
         "T": T,
-        "Z": Z
+        "Z": Z,
+        "fval": fval
+    }
+
+
+def PoseFromKpts_FP_estim_K_using_WP(W_im, d, output_wp, score, center, scale, res):
+    R = output_wp["R"]
+    S = output_wp["S"] / res * (200 * scale)
+    T = (output_wp["T"] / res - 0.5) * (200 * scale) + np.expand_dims(center, 1)
+
+    def foverr(f, d, axis):
+        h = T[axis] - d
+        theta = np.arctan2(h, f)
+        r = np.array([
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta), np.cos(theta)]])
+        if (len(r.shape) == 3): # autograd quirks
+            r = r[:,:,0]
+        ryz = r @ ((R @ S)[[axis, 2]])
+        p = (ryz[0] + h) / (ryz[1] + f) * f + d
+        return np.sum(((W_im[axis] - p) * np.sqrt(score)) ** 2)
+
+    f = 1000.0
+    dx = 500.0
+    dy = 500.0
+    cd = ChangeDetect(foverr(f, dx, 0) + foverr(f, dy, 1))
+    for i in range(100):
+        f = linesearch(lambda x: foverr(x, dx, 0) + foverr(x, dy, 1), f, 10.0, 10, 10000, 1)
+        dx = linesearch(lambda x: foverr(f, x, 0), dx, 10.0, 0, 640, 1)
+        dy = linesearch(lambda x: foverr(f, x, 1), dy, 10.0, 0, 640, 1)
+        if not cd.changed(foverr(f, dx, 0) + foverr(f, dy, 1), 0.001):
+            break
+
+    K = np.array([
+        [f, 0, dx],
+        [0, f, dy],
+        [0, 0, 1],
+    ])
+    W_ho = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
+    output_fp2 = PoseFromKpts_FP(W_ho, d, r0=output_wp["R"], weight=score, verb=False)
+    output_fp2["f"] = f
+    output_fp2["dx"] = dx
+    output_fp2["dy"] = dy
+    output_fp2["K"] = K
+    return output_fp2
+
+
+def PoseFromKpts_FP_estim_K_solely(W_im, d, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
+    D = np.eye(np.size(W_im, 1)) if weight is None else np.diag(weight)
+    R = np.eye(3) if r0 is None else r0
+
+    mu = centralize(d["mu"])
+    pc = centralize(d["pc"])
+
+    eps = np.finfo(float).eps
+
+    S = mu.copy()
+
+    def foverr(f, di, axis):
+        Wp = W_im[axis]
+        rs = (R@S)[[axis, 2]]
+        t = np.mean(Wp) - di
+        theta = np.arctan2(t, f)
+        r = np.array([
+            [np.cos(theta), -np.sin(theta)],
+            [np.sin(theta), np.cos(theta)]])
+        k = f * np.std((r.T@rs)[0]) / np.std(Wp)
+        def err(t, k):
+            p = (rs[0] + t / f * k) / (rs[1] + k) + di
+            return np.sum(((Wp - p) * np.sqrt(weight)) ** 2)
+
+        return err(t, k)
+
+    f = 1000.0
+    dx = 500.0
+    dy = 500.0
+
+    cd = ChangeDetect(foverr(f, dx, 0) + foverr(f, dy, 1))
+    for i in range(100):
+        f = linesearch(lambda x: foverr(x, dx, 0) + foverr(x, dy, 1), f, 10.0, 10, 10000, 1)
+        dx = linesearch(lambda x: foverr(f, x, 0), dx, 10.0, 0, 640, 1)
+        dy = linesearch(lambda x: foverr(f, x, 1), dy, 10.0, 0, 640, 1)
+        if not cd.changed(foverr(f, dx, 0) + foverr(f, dy, 1), 0.001):
+            break
+
+    K = np.array([
+        [f, 0, dx],
+        [0, f, dy],
+        [0, 0, 1],
+    ])
+    W = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
+
+    T = np.mean(W, 1, keepdims=True) * np.mean(np.std(R[0:2, :] @ S, axis=1, keepdims=True)) / np.mean(
+        np.std(W, axis=1) + eps)
+    C = 0
+
+    fval = np.inf
+    for iter in range(1000):
+        Z = np.sum(W * ((R@S) + T), axis=0) / (np.sum(W ** 2, axis=0) + eps)
+
+        Sp = W @ np.diag(Z)
+        T = np.sum((Sp - R@S)@D, axis=1, keepdims=True)/(np.sum(np.diag(D)) + eps)
+        St = Sp - T
+        U,_,V = np.linalg.svd(St@D@S.T)
+
+        R = U @ np.diag([1, 1, np.sign(np.linalg.det(U@V.T))]) @ V
+
+        if np.prod(np.size(pc)) != 0:
+            y = reshapeS(R.T @ St - mu, 'b2v')
+            X = reshapeS(pc, 'b2v')
+            C = np.linalg.pinv(X.T @ X + lam * np.eye(np.max(np.shape(C)))) @ X.T @ y
+            S = mu + composeShape(pc, C)
+
+        fvaltml = fval
+        fval = np.linalg.norm((St - R@S) @ np.sqrt(D), 'fro') ** 2 + lam * np.linalg.norm(C) ** 2
+
+        if verb:
+            print("Iter: {}, fval = {}".format(iter, fval))
+
+        if abs(fval - fvaltml) / (fvaltml + eps) < tol:
+            break
+
+    return {
+        "S": S,
+        "R": R,
+        "C": C,
+        "T": T,
+        "Z": Z,
+        "fval": fval,
+        "f": f,
+        "dx": dx,
+        "dy": dy,
+        "K": K,
     }

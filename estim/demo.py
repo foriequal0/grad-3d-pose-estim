@@ -6,7 +6,7 @@ from imageio import imread
 
 from estim.util import load, findWmax
 from .vis import transformHG, fullShape, vis_fp, vis_wp
-from .core import PoseFromKpts_WP, PoseFromKpts_FP
+from .core import PoseFromKpts_WP, PoseFromKpts_FP, PoseFromKpts_FP_estim_K_using_WP, PoseFromKpts_FP_estim_K_solely
 from .util import mldivide
 from object3d.opts import opts
 
@@ -62,11 +62,24 @@ def demo_fp():
         heatmap = h5py.File(valid_h5).get("heatmaps")[0]
         W_hp, score = findWmax(heatmap)
         W_im = transformHG(W_hp, center, scale, heatmap.shape[1:], True)
-        W_ho = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
 
         output_wp = PoseFromKpts_WP(W_hp, d, weight=score, verb=False)
 
+        W_ho = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
         output_fp = PoseFromKpts_FP(W_ho, d, r0=output_wp["R"], weight=score, verb=False)
+        print("fval 2: ", output_fp["fval"])
+
+        output_fp2 = PoseFromKpts_FP_estim_K_using_WP(W_im, d, output_wp, score, center, scale, heatmap.shape[1])
+        print("fval 3: ", output_fp2["fval"], output_fp2["f"], output_fp2["dx"], output_fp2["dy"])
+
+        output_fp_uncalib = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=output_wp["R"], weight=score, verb=False)
+        print("fval 4: ", output_fp_uncalib["fval"],
+            output_fp_uncalib["f"],
+            output_fp_uncalib["dx"],
+            output_fp_uncalib["dy"]
+        )
+        output_fp = output_fp_uncalib
+        K = output_fp["K"]
         S_fp = output_fp["R"] @ output_fp["S"] + output_fp["T"]
         model_fp, w, _, T_fp = fullShape(S_fp, cad)
         output_fp["T_metric"] = T_fp/w
