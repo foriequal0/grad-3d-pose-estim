@@ -97,7 +97,7 @@ def demo_fp():
         )
 
         img = imread(path.join(datapath, "images/{}".format(imgname)))
-        vis_fp(img, [output_fp, output_fp2, output_fp3], output_wp, heatmap, center, scale, K, cad)
+        vis_fp(img, [output_fp, output_fp2, output_fp3], output_wp, heatmap, center, scale, cad)
 
 
 def pascal3d_eval():
@@ -110,8 +110,10 @@ def pascal3d_eval():
     annotfile = path.join(datapath, "valid.mat")
     annotmat = load(annotfile)
     annot = annotmat["annot"]
+    import pathlib
 
-    for idx in np.where(~annot.occluded & ~annot.truncated & (getattr(annot, "class") != "aeroplane"))[0]:
+    pathlib.Path("plot").mkdir(parents=True, exist_ok=True)
+    for idx in np.where(~annot.occluded & ~annot.truncated )[0]:
         id = idx+1
         imgname = annot.imgname[idx]
         center = annot.center[idx]
@@ -136,7 +138,33 @@ def pascal3d_eval():
         hm = h5py.File(valid_h5).get("heatmaps")
         hm = hm[indices[d["kpt_id"].astype(int) - 1],:,:]
         W_hp, score = findWmax(hm)
+        W_im = transformHG(W_hp, center, scale, hm.shape[1:], True)
+        def reproj_err(x):
+            err = W_hp - x
+            return np.mean(np.sqrt(np.diag(err.T @ err)) * score)
+
+        def reproj_fp(output, K):
+            fp = K @ (output["R"] @ output["S"] + output["T"])
+            p = fp[0:2] / fp[2]
+            return reproj_err(transformHG(p, center, scale, hm.shape[1:], False))
 
         output_wp = PoseFromKpts_WP(W_hp + 1, d, weight=score, verb=False, lam=1)
+
+        wp_reproj = reproj_err((output_wp["R"] @ output_wp["S"])[0:2] + output_wp["T"])
+        print("err wp: ", wp_reproj)
+
+        output_fp2 = PoseFromKpts_FP_estim_K_using_WP(W_im, d, output_wp, score, center, scale, hm.shape[1])
+        fp2_reproj = reproj_fp(output_fp2, output_fp2["K"])
+        print("err fp2: ", fp2_reproj)
+        print("fval FP_estim_K_using_WP: ", output_fp2["fval"], output_fp2["f"], output_fp2["d"])
+
+        output_fp3 = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=output_wp["R"], weight=score, verb=False)
+        fp3_reproj = reproj_fp(output_fp3, output_fp3["K"])
+        print("err fp3: ", fp3_reproj)
+        print("fval FP_estim_K_solely: ", output_fp3["fval"],
+              output_fp3["f"],
+              output_fp3["d"]
+              )
+
         img = imread(path.join(datapath, "../images/{}.jpg".format(imgname)))
-        vis_wp(img, output_wp, hm, center, scale, cad.__dict__, d)
+        vis_fp(img, [output_fp2, output_fp3], output_wp, hm, center, scale, cad.__dict__, "plot/{}.jpg".format(idx))

@@ -44,5 +44,5 @@ def findWmax(hm):
         max = np.max(hm[i])
         score[i] = max
         [u,v] = np.where(hm[i] == max)
-        W_max[:, i] = [v,u]
+        W_max[:, i] = [v[0],u[0]]
     return W_max, score

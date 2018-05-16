@@ -240,7 +240,7 @@ def composeShape(B, C):
 
     B = np.reshape(B.T, [3 * p, k])
     S = np.reshape(B @ C.T, [p, 3*f])
-    return S
+    return S.T
 
 
 def PoseFromKpts_FP(W, d, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
@@ -254,7 +254,7 @@ def PoseFromKpts_FP(W, d, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
 
     S = mu.copy()
     T = np.mean(W, 1, keepdims=True) * np.mean(np.std(R[0:2, :] @ S, axis=1, keepdims=True)) / np.mean(np.std(W, axis=1) + eps)
-    C = 0
+    C = np.zeros([1, np.size(pc, 0)//3])
 
     fval = np.inf
     for iter in range(1000):
@@ -317,14 +317,14 @@ def PoseFromKpts_FP_estim_K_using_WP(W_im, dict, output_wp, score, center, scale
     R = output_wp["R"]
     S = output_wp["S"] / res * (200 * scale)
     T = (output_wp["T"][:,0] / res - 0.5) * (200 * scale) + center
-
+    normalized_W_im = normalize(W_im)
     def foverr(f, d):
         h = T - d
         r = rotationMatrix(np.array([0, 0, f]), np.array([h[0], h[1], f]))
         ryz = r @ R @ S
         p = (ryz[0:2] + np.expand_dims(h, 1)) / (ryz[2] + f) * f + np.expand_dims(d, 1)
 
-        return np.sum(((normalize(W_im) - normalize(p)) * np.sqrt(score)) ** 2)
+        return np.sum((((normalized_W_im - normalize(p))) ** 2) * score)
 
     f0 = 1000.0
     dx0 = 320.0
@@ -363,18 +363,22 @@ def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=
     eps = np.finfo(float).eps
 
     S = mu.copy()
-
+    normalized_W_im = normalize(W_im)
+    RS = R @ S
     def foverr(f, di):
-        RS = R@S
-        t = np.mean(W_im, 1) - di
-        r = rotationMatrix(np.array([0,0,f]), np.array([t[0], t[1], f]))
+        t0 = np.mean(W_im, 1) - di
+        r = rotationMatrix(np.array([0,0,f]), np.array([t0[0], t0[1], f]))
         rRS = r.T@RS
-        k = f * estimSize(rRS[0:2]) / estimSize(W_im)
+        k0 = f * estimSize(rRS[0:2]) / estimSize(W_im)
         def err(t, k):
             p = (rRS[0:2] + np.expand_dims(t, 1) / f * k) / (rRS[2] + k) + np.expand_dims(di, 1)
-            return np.sum(((normalize(W_im) - normalize(p)) * np.sqrt(weight)) ** 2)
-
-        return err(t, k)
+            return np.sum((((normalized_W_im - normalize(p)) * np.sqrt(weight)) ** 2) * weight)
+        # k0 = linesearch(lambda x: err(t0, x),
+        #                    k0, 10.0,
+        #                    0,
+        #                    f,
+        #                    5)
+        return err(t0, k0)
 
 
     f0 = 1000.0
@@ -396,7 +400,7 @@ def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=
 
     T = np.mean(W, 1, keepdims=True) * np.mean(np.std(R[0:2, :] @ S, axis=1, keepdims=True)) / np.mean(
         np.std(W, axis=1) + eps)
-    C = 0
+    C = np.zeros([1, np.size(pc, 0) // 3])
 
     fval = np.inf
     for iter in range(1000):

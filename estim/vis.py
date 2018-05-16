@@ -119,7 +119,7 @@ def vis_wp(img, opt, heatmap, center, scale, cad, d):
     plt.show()
 
 
-def vis_fp(img, opt_fps, opt_wp, heatmap, center, scale, K, cad):
+def vis_fp(img, opt_fps, opt_wp, heatmap, center, scale, cad, path=None):
     # Some limiting conditions on Wedg
     from matplotlib.collections import PolyCollection
 
@@ -180,4 +180,8 @@ def vis_fp(img, opt_fps, opt_wp, heatmap, center, scale, K, cad):
         )
         i+=1
 
-    plt.show()
+    if path is None:
+        plt.show()
+    else:
+        plt.savefig(path)
+        plt.close(h)
