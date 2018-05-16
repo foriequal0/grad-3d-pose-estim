@@ -119,23 +119,25 @@ def vis_wp(img, opt, heatmap, center, scale, cad, d):
     plt.show()
 
 
-def vis_fp(img, opt_fp, opt_wp, heatmap, center, scale, K, cad):
+def vis_fp(img, opt_fps, opt_wp, heatmap, center, scale, K, cad):
     # Some limiting conditions on Wedg
     from matplotlib.collections import PolyCollection
 
     img_crop = cropImage(img, center, scale)
-    nplot = 4
-    h = plt.figure(None, (nplot, 1))
-
-    def add_axes(left):
-        a = h.add_axes(((left - nplot/2+0.5)/nplot, 0, 1, 1))
+    wplot = max(3, len(opt_fps))
+    hplot = 2
+    #h = plt.figure(None, (wplot, hplot), dpi=300)
+    h, axes = plt.subplots(hplot, wplot, tight_layout=True)
+    def add_axes(left, top):
+        a = axes[top][left]
+        a.set_axis_off()
         a.xaxis.set_visible(False)
         a.yaxis.set_visible(False)
         return a
-    a = add_axes(0)
+    a = add_axes(0, 0)
     a.imshow(img_crop)
 
-    a = add_axes(1)
+    a = add_axes(1, 0)
     response = np.sum(heatmap, axis=0)
     max_value = np.max(response)
     jet = mpl.cm.get_cmap('jet')
@@ -147,7 +149,7 @@ def vis_fp(img, opt_fp, opt_wp, heatmap, center, scale, K, cad):
     model_wp, _, _, _ = fullShape(S_wp, cad)
     mesh2d_wp = model_wp["vertices"][:, 0:2] * 200 / np.size(heatmap, 1)
 
-    a = add_axes(2)
+    a = add_axes(2, 0)
     a.imshow(img_crop)
     a.hold()
     a.add_collection(
@@ -156,19 +158,26 @@ def vis_fp(img, opt_fp, opt_wp, heatmap, center, scale, K, cad):
             alpha=0.4)
     )
 
-    S_fp = opt_fp["R"] @ opt_fp["S"] + opt_fp["T"]
-    model_fp, _, _, _ = fullShape(S_fp, cad)
-    mesh2d_fp = K @ model_fp["vertices"].T
-    mesh2d_fp = (mesh2d_fp[0:2, :] / mesh2d_fp[2,:])
-    mesh2d_fp = transformHG(mesh2d_fp, center, scale, heatmap[0].shape, False) *200 / np.size(heatmap, 1)
-    mesh2d_fp = mesh2d_fp.T
-    a = add_axes(3)
-    a.imshow(img_crop)
-    a.hold()
-    a.add_collection(
-        PolyCollection(
-            [mesh2d_fp[face] for face in model_fp["faces"].astype(int)-1],
-            alpha=0.4)
-    )
+    i=0
+    for opt_fp in opt_fps:
+        K = opt_fp["K"]
+        S_fp = opt_fp["R"] @ opt_fp["S"] + opt_fp["T"]
+        model_fp, w, _, T_fp = fullShape(S_fp, cad)
+
+        S_fp = opt_fp["R"] @ opt_fp["S"] + opt_fp["T"]
+        model_fp, _, _, _ = fullShape(S_fp, cad)
+        mesh2d_fp = K @ model_fp["vertices"].T
+        mesh2d_fp = (mesh2d_fp[0:2, :] / mesh2d_fp[2,:])
+        mesh2d_fp = transformHG(mesh2d_fp, center, scale, heatmap[0].shape, False) *200 / np.size(heatmap, 1)
+        mesh2d_fp = mesh2d_fp.T
+        a = add_axes(i, 1)
+        a.imshow(img_crop)
+        a.hold()
+        a.add_collection(
+            PolyCollection(
+                [mesh2d_fp[face] for face in model_fp["faces"].astype(int)-1],
+                alpha=0.4)
+        )
+        i+=1
 
     plt.show()

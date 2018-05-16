@@ -95,14 +95,9 @@ def demo_fp():
               output_fp3["f"],
               output_fp3["d"]
         )
-        output_fp = output_fp_solely
-        K = output_fp["K"]
-        S_fp = output_fp["R"] @ output_fp["S"] + output_fp["T"]
-        model_fp, w, _, T_fp = fullShape(S_fp, cad)
-        output_fp["T_metric"] = T_fp/w
 
         img = imread(path.join(datapath, "images/{}".format(imgname)))
-        vis_fp(img, output_fp, output_wp, heatmap, center, scale, K, cad)
+        vis_fp(img, [output_fp, output_fp2, output_fp3], output_wp, heatmap, center, scale, K, cad)
 
 
 def pascal3d_eval():
