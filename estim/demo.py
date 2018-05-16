@@ -63,19 +63,37 @@ def demo_fp():
         W_hp, score = findWmax(heatmap)
         W_im = transformHG(W_hp, center, scale, heatmap.shape[1:], True)
 
+        def reproj_err(x):
+            err = W_hp - x
+            return np.mean(np.sqrt(np.diag(err.T @ err)) * score)
+
+        def reproj_fp(output, K):
+            fp = K @ (output["R"] @ output["S"] + output["T"])
+            p = fp[0:2] / fp[2]
+            return reproj_err(transformHG(p, center, scale, heatmap.shape[1:], False))
+
         output_wp = PoseFromKpts_WP(W_hp, d, weight=score, verb=False)
+        wp_reproj = reproj_err((output_wp["R"] @ output_wp["S"])[0:2] + output_wp["T"])
+        print("err wp: ", wp_reproj)
 
         W_ho = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
         output_fp = PoseFromKpts_FP(W_ho, d, r0=output_wp["R"], weight=score, verb=False)
+        output_fp["K"] = K
+        fp_reproj = reproj_fp(output_fp, K)
+        print("err fp: ", fp_reproj)
         print("fval FP: ", output_fp["fval"])
 
         output_fp2 = PoseFromKpts_FP_estim_K_using_WP(W_im, d, output_wp, score, center, scale, heatmap.shape[1])
+        fp2_reproj = reproj_fp(output_fp2, output_fp2["K"])
+        print("err fp2: ", fp2_reproj)
         print("fval FP_estim_K_using_WP: ", output_fp2["fval"], output_fp2["f"], output_fp2["d"])
 
-        output_fp_solely = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=output_wp["R"], weight=score, verb=False)
-        print("fval FP_estim_K_solely: ", output_fp_solely["fval"],
-              output_fp_solely["f"],
-              output_fp_solely["d"]
+        output_fp3 = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=output_wp["R"], weight=score, verb=False)
+        fp3_reproj = reproj_fp(output_fp3, output_fp3["K"])
+        print("err fp3: ", fp3_reproj)
+        print("fval FP_estim_K_solely: ", output_fp3["fval"],
+              output_fp3["f"],
+              output_fp3["d"]
         )
         output_fp = output_fp_solely
         K = output_fp["K"]
