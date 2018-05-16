@@ -292,33 +292,48 @@ def PoseFromKpts_FP(W, d, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
     }
 
 
-def PoseFromKpts_FP_estim_K_using_WP(W_im, d, output_wp, score, center, scale, res):
+def rotationMatrix(a, b):
+    a = a / np.linalg.norm(a)
+    b = b / np.linalg.norm(b)
+
+    v = np.cross(a, b)
+    s = np.linalg.norm(v)
+    c = np.dot(a, b)
+    skew_sym = np.array([
+        [0, -v[2], v[1]],
+        [v[2], 0, -v[0]],
+        [-v[1], v[0], 0]
+    ])
+    return np.eye(3) + skew_sym + skew_sym@skew_sym/(1+c)
+
+
+def normalize(x):
+    mean = np.mean(x, 1, keepdims=True)
+    std = np.std(x, 1, keepdims=True)
+    return (x-mean)/std
+
+
+def PoseFromKpts_FP_estim_K_using_WP(W_im, dict, output_wp, score, center, scale, res):
     R = output_wp["R"]
     S = output_wp["S"] / res * (200 * scale)
-    T = (output_wp["T"] / res - 0.5) * (200 * scale) + np.expand_dims(center, 1)
+    T = (output_wp["T"][:,0] / res - 0.5) * (200 * scale) + center
 
-    def foverr(f, d, axis):
-        h = T[axis] - d
-        theta = np.arctan2(h, f)
-        r = np.array([
-            [np.cos(theta), -np.sin(theta)],
-            [np.sin(theta), np.cos(theta)]])
-        if (len(r.shape) == 3): # autograd quirks
-            r = r[:,:,0]
-        ryz = r @ ((R @ S)[[axis, 2]])
-        p = (ryz[0] + h) / (ryz[1] + f) * f + d
-        return np.sum(((W_im[axis] - p) * np.sqrt(score)) ** 2)
+    def foverr(f, d):
+        h = T - d
+        r = rotationMatrix(np.array([0, 0, f]), np.array([h[0], h[1], f]))
+        ryz = r @ R @ S
+        p = (ryz[0:2] + np.expand_dims(h, 1)) / (ryz[2] + f) * f + np.expand_dims(d, 1)
 
-    f = 1000.0
-    dx = 500.0
-    dy = 500.0
-    cd = ChangeDetect(foverr(f, dx, 0) + foverr(f, dy, 1))
-    for i in range(100):
-        f = linesearch(lambda x: foverr(x, dx, 0) + foverr(x, dy, 1), f, 10.0, 10, 10000, 1)
-        dx = linesearch(lambda x: foverr(f, x, 0), dx, 10.0, 0, 640, 1)
-        dy = linesearch(lambda x: foverr(f, x, 1), dy, 10.0, 0, 640, 1)
-        if not cd.changed(foverr(f, dx, 0) + foverr(f, dy, 1), 0.001):
-            break
+        return np.sum(((normalize(W_im) - normalize(p)) * np.sqrt(score)) ** 2)
+
+    f0 = 1000.0
+    dx0 = 320.0
+    dy0 = 240.0
+    f, dx, dy = linesearch(lambda x: foverr(x[0], x[1:3]),
+                           np.array([f0, dx0, dy0]), 10.0,
+                           np.array([10, 0, 0]),
+                           np.array([10000, 1000, 1000]),
+                           100)
 
     K = np.array([
         [f, 0, dx],
@@ -326,57 +341,57 @@ def PoseFromKpts_FP_estim_K_using_WP(W_im, d, output_wp, score, center, scale, r
         [0, 0, 1],
     ])
     W_ho = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
-    output_fp2 = PoseFromKpts_FP(W_ho, d, r0=output_wp["R"], weight=score, verb=False)
+    output_fp2 = PoseFromKpts_FP(W_ho, dict, r0=output_wp["R"], weight=score, verb=False)
     output_fp2["f"] = f
-    output_fp2["dx"] = dx
-    output_fp2["dy"] = dy
+    output_fp2["d"] = [dx, dy]
     output_fp2["K"] = K
     return output_fp2
 
+def estimSize(X):
+    mean = np.mean(X, 1, keepdims=True)
+    centered = X - mean
+    distance = np.sqrt(np.diag(centered.T @ centered))
+    return np.std(distance)
 
-def PoseFromKpts_FP_estim_K_solely(W_im, d, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
+def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
     D = np.eye(np.size(W_im, 1)) if weight is None else np.diag(weight)
     R = np.eye(3) if r0 is None else r0
 
-    mu = centralize(d["mu"])
-    pc = centralize(d["pc"])
+    mu = centralize(dict["mu"])
+    pc = centralize(dict["pc"])
 
     eps = np.finfo(float).eps
 
     S = mu.copy()
 
-    def foverr(f, di, axis):
-        Wp = W_im[axis]
-        rs = (R@S)[[axis, 2]]
-        t = np.mean(Wp) - di
-        theta = np.arctan2(t, f)
-        r = np.array([
-            [np.cos(theta), -np.sin(theta)],
-            [np.sin(theta), np.cos(theta)]])
-        k = f * np.std((r.T@rs)[0]) / np.std(Wp)
+    def foverr(f, di):
+        RS = R@S
+        t = np.mean(W_im, 1) - di
+        r = rotationMatrix(np.array([0,0,f]), np.array([t[0], t[1], f]))
+        rRS = r.T@RS
+        k = f * estimSize(rRS[0:2]) / estimSize(W_im)
         def err(t, k):
-            p = (rs[0] + t / f * k) / (rs[1] + k) + di
-            return np.sum(((Wp - p) * np.sqrt(weight)) ** 2)
+            p = (rRS[0:2] + np.expand_dims(t, 1) / f * k) / (rRS[2] + k) + np.expand_dims(di, 1)
+            return np.sum(((normalize(W_im) - normalize(p)) * np.sqrt(weight)) ** 2)
 
         return err(t, k)
 
-    f = 1000.0
-    dx = 500.0
-    dy = 500.0
 
-    cd = ChangeDetect(foverr(f, dx, 0) + foverr(f, dy, 1))
-    for i in range(100):
-        f = linesearch(lambda x: foverr(x, dx, 0) + foverr(x, dy, 1), f, 10.0, 10, 10000, 1)
-        dx = linesearch(lambda x: foverr(f, x, 0), dx, 10.0, 0, 640, 1)
-        dy = linesearch(lambda x: foverr(f, x, 1), dy, 10.0, 0, 640, 1)
-        if not cd.changed(foverr(f, dx, 0) + foverr(f, dy, 1), 0.001):
-            break
+    f0 = 1000.0
+    dx0 = 320.0
+    dy0 = 240.0
+    f, dx, dy = linesearch(lambda x: foverr(x[0], x[1:3]),
+                           np.array([f0, dx0, dy0]), 10.0,
+                           np.array([10, 0, 0]),
+                           np.array([10000, 1000, 1000]),
+                           100)
 
     K = np.array([
         [f, 0, dx],
         [0, f, dy],
         [0, 0, 1],
     ])
+
     W = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
 
     T = np.mean(W, 1, keepdims=True) * np.mean(np.std(R[0:2, :] @ S, axis=1, keepdims=True)) / np.mean(
@@ -417,7 +432,6 @@ def PoseFromKpts_FP_estim_K_solely(W_im, d, lam=1, tol=1e-3, weight=None, r0=Non
         "Z": Z,
         "fval": fval,
         "f": f,
-        "dx": dx,
-        "dy": dy,
+        "d": [dx, dy],
         "K": K,
     }

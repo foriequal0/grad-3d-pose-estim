@@ -18,13 +18,13 @@ class ChangeDetect:
             return np.any(change > threshold)
 
 
-def backtrack(f, x, a0, t, n, l, h):
+def backtrack(f, x, g, p, a0, t, n, l, h):
     a = a0
     fk = f(x)
     for i in range(n):
-        fa = f(x + a)
-        if (l <= x+a <= h) and fa < fk:
-            return a
+        fa = f(x + a*p)
+        if np.all(l <= x+a) and np.all(x+a <= h) and fa < fk + a * 0.001 * np.dot(p, g):
+            return a*p
         else:
             a *= t
     else:
@@ -33,16 +33,16 @@ def backtrack(f, x, a0, t, n, l, h):
 
 def linesearch(f, x0, a0, l, h, n):
     x = x0
-    g = grad(f)
+    grad_f = grad(f)
     cd = ChangeDetect(f(x))
     for _ in range(n):
-        s = g(x)
-
-        a = backtrack(f, x, -s * a0, 0.5, 10, l, h)
+        g = grad_f(x)
+        p = -g/np.linalg.norm(g)
+        a = backtrack(f, x, g, p, a0, 0.5, 10, l, h)
 
         if a is not None:
             x += a
-            if not cd.changed(f(x), 0.001):
+            if not cd.changed(f(x), 0.0001):
                 return x
         else:
             return x

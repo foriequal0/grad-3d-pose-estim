@@ -67,18 +67,17 @@ def demo_fp():
 
         W_ho = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
         output_fp = PoseFromKpts_FP(W_ho, d, r0=output_wp["R"], weight=score, verb=False)
-        print("fval 2: ", output_fp["fval"])
+        print("fval FP: ", output_fp["fval"])
 
         output_fp2 = PoseFromKpts_FP_estim_K_using_WP(W_im, d, output_wp, score, center, scale, heatmap.shape[1])
-        print("fval 3: ", output_fp2["fval"], output_fp2["f"], output_fp2["dx"], output_fp2["dy"])
+        print("fval FP_estim_K_using_WP: ", output_fp2["fval"], output_fp2["f"], output_fp2["d"])
 
-        output_fp_uncalib = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=output_wp["R"], weight=score, verb=False)
-        print("fval 4: ", output_fp_uncalib["fval"],
-            output_fp_uncalib["f"],
-            output_fp_uncalib["dx"],
-            output_fp_uncalib["dy"]
+        output_fp_solely = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=output_wp["R"], weight=score, verb=False)
+        print("fval FP_estim_K_solely: ", output_fp_solely["fval"],
+              output_fp_solely["f"],
+              output_fp_solely["d"]
         )
-        output_fp = output_fp_uncalib
+        output_fp = output_fp_solely
         K = output_fp["K"]
         S_fp = output_fp["R"] @ output_fp["S"] + output_fp["T"]
         model_fp, w, _, T_fp = fullShape(S_fp, cad)

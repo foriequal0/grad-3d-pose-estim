@@ -1,29 +1,21 @@
 [[source]]
-
 url = "https://pypi.python.org/simple"
 verify_ssl = true
 name = "pypi"
 
-
 [packages]
-
 jupyter = "*"
 matplotlib = "*"
 sympy = "*"
-tensorflow = ">=1.4,<1.5"
 scipy = "*"
 numpy = "*"
 "h5py" = "*"
 pymanopt = { git = "https://github.com/pymanopt/pymanopt", ref = "79d12fe564ec586ed17e76f359009f981d8fc356" }
-autograd = "*"
 imageio = "*"
 scikit-image = "*"
-
+tensorflow = {path = "https://github.com/mind/wheels/releases/download/tf1.7-gpu-cuda91-nomkl/tensorflow-1.7.0-cp35-cp35m-linux_x86_64.whl"}
+autograd = {path = "git+http://github.com/HIPS/autograd.git@442205dfefe407beffb33550846434baa90c4de7"}
 
 [dev-packages]
 
-
-
 [requires]
-
-python_version = "3.6"
