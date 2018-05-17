@@ -77,9 +77,9 @@ def process():
         hm = np.transpose(hm, [2, 0, 1])
         hm = hm[indices[d["kpt_id"].astype(int) - 1], :, :]
 
-        hm_after_count = np.sum(np.max(np.max(hm, axis=1), axis=1) > 0.1)
-        if hm_after_count < 4:
-            return
+        # hm_after_count = np.sum(np.max(np.max(hm, axis=1), axis=1) > 0.1)
+        # if hm_after_count < 4:
+        #     return
         hm_gt = np.transpose(hm_gt, [2, 0, 1])
         hm_gt = hm_gt[indices[d["kpt_id"].astype(int) - 1], :, :]
 
@@ -105,13 +105,24 @@ def process():
             [0, -1, 0],
             [0, 0, 1],
         ]), np.array([
-            [1,0,0],
+            [1, 0, 0],
             [0, 1, 0],
             [0, 0, -1]
+        ]), np.array([
+            [0, 1, 0],
+            [-1, 0, 0],
+            [0, 0, 1]
+        ]), np.array([
+            [1, 0, 0],
+            [0, 0, 1],
+            [0, -1, 0]
+        ]), np.array([
+            [0, 0, -1],
+            [0, 1, 0],
+            [1, 0, 0]
         ])]
 
         W_im = transformHG(W_hp, center, scale, hm.shape[1:], True)
-        W_im_true = transformHG(W_hp_gt, center, scale, hm.shape[1:], True)
 
         wp = PoseFromKpts_WP(W_hp + 1, d, weight=score, verb=False, lam=1)
         fp2 = PoseFromKpts_FP_estim_K_using_WP(W_im, d, wp, score, center, scale, hm.shape[1])
@@ -198,8 +209,8 @@ with tf.Session() as sess:
         i = sess.run(loader.make_input_and_labels({k:tf.convert_to_tensor(v) for k,v in i.items() }))
 
         hm_pre_count = np.sum(np.max(np.max(i["labels"], axis=0), axis=0) > 0)
-        if hm_pre_count < 4:
-            continue
+        # if hm_pre_count < 4:
+        #     continue
         res, = sess.run(out1, {
             input: np.expand_dims(i["input"], axis=0)
         })

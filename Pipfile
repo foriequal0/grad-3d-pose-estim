@@ -15,6 +15,8 @@ imageio = "*"
 scikit-image = "*"
 tensorflow = {path = "https://github.com/mind/wheels/releases/download/tf1.7-gpu-cuda91-nomkl/tensorflow-1.7.0-cp35-cp35m-linux_x86_64.whl"}
 autograd = {path = "git+http://github.com/HIPS/autograd.git@442205dfefe407beffb33550846434baa90c4de7"}
+seaborn = "*"
+pandas = "*"
 
 [dev-packages]
 
