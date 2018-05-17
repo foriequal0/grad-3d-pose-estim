@@ -32,6 +32,7 @@ def backtrack(f, x, g, p, a0, t, n, l, h):
         return None
 
 
+
 def linesearch(f, x0, a0, l, h, n):
     x = x0
     grad_f = grad(f)
@@ -46,6 +47,44 @@ def linesearch(f, x0, a0, l, h, n):
             if not cd.changed(f(x), 0.0001):
                 return x
         else:
+            return x
+    else:
+        return x
+
+
+def backtrack1d(f, x, a0, t, n, l, h):
+    a = a0
+    fk = f(x)
+    for i in range(n):
+        fa = f(x + a)
+        if l <= x+a <= h and fa < fk:
+            return fa, x+a
+        else:
+            a *= t
+    else:
+        return None, None
+
+
+def linesearch1d(f, x0, a0, l, h, n):
+    x = x0
+    cd = ChangeDetect(f(x))
+    for _ in range(n):
+        fa, xa = backtrack1d(f, x, a0, 0.5, 10, l, h)
+        fb, xb = backtrack1d(f, x, a0, 0.5, 10, l, h)
+
+        if fa is not None and fb is not None:
+            if abs(fa) < abs(fb):
+                x = xa
+            else:
+                x = xb
+        elif fa is not None:
+            x = xa
+        elif fb is not None:
+            x = xb
+        else:
+            return x
+
+        if not cd.changed(f(x), 0.0001):
             return x
     else:
         return x

@@ -5,7 +5,7 @@ from pymanopt.manifolds import Stiefel
 from pymanopt.solvers import TrustRegions
 
 from .util import mldivide, mrdivide, centralize, reshapeS
-from .linesearch import linesearch, ChangeDetect
+from .linesearch import linesearch, linesearch1d, ChangeDetect
 
 def prox_2norm(Z, lam):
     [U,W,V] = np.linalg.svd(Z, full_matrices=False)
@@ -312,19 +312,27 @@ def normalize(x):
     std = np.std(x, 1, keepdims=True)
     return (x-mean)/std
 
+def average(X, axis=None, weights=1):
+    return np.sum(X * weights, axis) / (np.sum(weights) + eps)
+
+def centralize_points(x, weight=1):
+    mean = average(x, 1, weight)
+    return (x-np.expand_dims(mean, 1))
 
 def PoseFromKpts_FP_estim_K_using_WP(W_im, dict, output_wp, score, center, scale, res):
     R = output_wp["R"]
     S = output_wp["S"] / res * (200 * scale)
     T = (output_wp["T"][:,0] / res - 0.5) * (200 * scale) + center
+
     normalized_W_im = normalize(W_im)
+
     def foverr(f, d):
         h = T - d
         r = rotationMatrix(np.array([0, 0, f]), np.array([h[0], h[1], f]))
         ryz = r @ R @ S
         p = (ryz[0:2] + np.expand_dims(h, 1)) / (ryz[2] + f) * f + np.expand_dims(d, 1)
 
-        return np.sum((((normalized_W_im - normalize(p))) ** 2) * score)
+        return np.sum((((centralize_points(W_im, score) - centralize_points(p, score))) ** 2) * score)
 
     f0 = 1000.0
     dx0 = 320.0
@@ -343,15 +351,22 @@ def PoseFromKpts_FP_estim_K_using_WP(W_im, dict, output_wp, score, center, scale
     W_ho = mldivide(K, np.concatenate([W_im, np.ones([1, np.size(W_im, 1)])]))[0]
     output_fp2 = PoseFromKpts_FP(W_ho, dict, r0=output_wp["R"], weight=score, verb=False)
     output_fp2["f"] = f
-    output_fp2["d"] = [dx, dy]
+    output_fp2["d"] = [dx,dy]
     output_fp2["K"] = K
     return output_fp2
 
-def estimSize(X):
-    mean = np.mean(X, 1, keepdims=True)
-    centered = X - mean
+
+eps = np.finfo(float).eps
+
+
+def estimSize(X, weights=1):
+    center = average(X, 1, weights=weights)
+    centered = X - np.expand_dims(center, 1)
+
     distance = np.sqrt(np.diag(centered.T @ centered))
-    return np.std(distance)
+    mean = average(distance, weights=weights)
+    var = average((distance-mean)**2, weights=weights)
+    return np.sqrt(var)
 
 def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=None, verb=True):
     D = np.eye(np.size(W_im, 1)) if weight is None else np.diag(weight)
@@ -359,8 +374,6 @@ def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=
 
     mu = centralize(dict["mu"])
     pc = centralize(dict["pc"])
-
-    eps = np.finfo(float).eps
 
     S = mu.copy()
     normalized_W_im = normalize(W_im)
@@ -372,12 +385,7 @@ def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=
         k0 = f * estimSize(rRS[0:2]) / estimSize(W_im)
         def err(t, k):
             p = (rRS[0:2] + np.expand_dims(t, 1) / f * k) / (rRS[2] + k) + np.expand_dims(di, 1)
-            return np.sum((((normalized_W_im - normalize(p)) * np.sqrt(weight)) ** 2) * weight)
-        # k0 = linesearch(lambda x: err(t0, x),
-        #                    k0, 10.0,
-        #                    0,
-        #                    f,
-        #                    5)
+            return np.sum(((centralize_points(W_im, weight) - centralize_points(p, weight)) ** 2) * weight)
         return err(t0, k0)
 
 
@@ -436,6 +444,6 @@ def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=
         "Z": Z,
         "fval": fval,
         "f": f,
-        "d": [dx, dy],
+        "d": [dx,dy],
         "K": K,
     }

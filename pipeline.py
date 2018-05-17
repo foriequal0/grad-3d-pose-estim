@@ -77,6 +77,9 @@ def process():
         hm = np.transpose(hm, [2, 0, 1])
         hm = hm[indices[d["kpt_id"].astype(int) - 1], :, :]
 
+        hm_after_count = np.sum(np.max(np.max(hm, axis=1), axis=1) > 0.1)
+        if hm_after_count < 4:
+            return
         hm_gt = np.transpose(hm_gt, [2, 0, 1])
         hm_gt = hm_gt[indices[d["kpt_id"].astype(int) - 1], :, :]
 
@@ -93,37 +96,60 @@ def process():
             p = fp[0:2] / fp[2]
             return reproj_err(W, transformHG(p, center, scale, hm.shape[1:], False), score)
 
+        mirrors = [ np.array([
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, 0, 1],
+        ]), np.array([
+            [1, 0, 0],
+            [0, -1, 0],
+            [0, 0, 1],
+        ]), np.array([
+            [1,0,0],
+            [0, 1, 0],
+            [0, 0, -1]
+        ])]
 
-        wp_gt = PoseFromKpts_WP(W_hp_gt + 1, d, weight=score_gt, verb=False, lam=1)
+        W_im = transformHG(W_hp, center, scale, hm.shape[1:], True)
         W_im_true = transformHG(W_hp_gt, center, scale, hm.shape[1:], True)
-        fp2_gt = PoseFromKpts_FP_estim_K_using_WP(W_im_true, d, wp_gt, score_gt, center, scale, hm.shape[1])
-        fp3_gt = PoseFromKpts_FP_estim_K_solely(W_im_true, d, r0=wp_gt["R"], weight=score_gt, verb=False)
 
         wp = PoseFromKpts_WP(W_hp + 1, d, weight=score, verb=False, lam=1)
-        W_im = transformHG(W_hp, center, scale, hm.shape[1:], True)
         fp2 = PoseFromKpts_FP_estim_K_using_WP(W_im, d, wp, score, center, scale, hm.shape[1])
+        fp2_err = reproj_fp(W_hp_gt, fp2, fp2["K"], score_gt)
+        for mirror in mirrors:
+            wp_alt = wp.copy()
+            wp_alt["R"] = wp["R"] @ mirror
+            a = PoseFromKpts_FP_estim_K_using_WP(W_im, d, wp_alt, score, center, scale, hm.shape[1])
+            err = reproj_fp(W_hp_gt, a, a["K"], score_gt)
+            if err < fp2_err:
+                fp2 = a
+                fp2_err = err
+
         fp3 = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=wp["R"], weight=score, verb=False)
+        fp3_err = reproj_fp(W_hp_gt, fp3, fp3["K"], score_gt)
+        for mirror in mirrors:
+            a = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=wp["R"] @ mirror, weight=score, verb=False)
+            err = reproj_fp(W_hp_gt, a, a["K"], score_gt)
+            if err < fp3_err:
+                fp3 = a
+                fp3_err = err
 
         csvwriter.writerow({
             "id": id,
             "class": clazz,
             "nonzeros": np.sum(score_gt),
             "hm_err": reproj_err(W_hp_gt, W_hp, score_gt),
-            "hm_gt_wp_reproj_err": reproj_err(W_hp_gt, (wp_gt["R"] @ wp_gt["S"])[0:2] + wp_gt["T"], score_gt),
-            "hm_gt_fp2_reproj_err": reproj_fp(W_hp_gt, fp2_gt, fp2_gt["K"], score_gt),
-            "hm_gt_fp3_reproj_err": reproj_fp(W_hp_gt, fp3_gt, fp3_gt["K"], score_gt),
 
             "hm_wp_reproj_err":  reproj_err(W_hp, (wp["R"] @ wp["S"])[0:2] + wp["T"], score),
             "hm_fp2_reproj_err": reproj_fp(W_hp, fp2, fp2["K"], score),
             "hm_fp3_reproj_err": reproj_fp(W_hp, fp3, fp3["K"], score),
 
             "hm_wp_reproj_err_to_gt":  reproj_err(W_hp_gt, (wp["R"] @ wp["S"])[0:2] + wp["T"], score_gt),
-            "hm_fp2_reproj_err_to_gt": reproj_fp(W_hp_gt, fp2, fp2["K"], score_gt),
-            "hm_fp3_reproj_err_to_gt": reproj_fp(W_hp_gt, fp3, fp3["K"], score_gt),
+            "hm_fp2_reproj_err_to_gt": fp2_err,
+            "hm_fp3_reproj_err_to_gt": fp3_err
         })
 
         img = imread(path.join(datapath, "../images/{}.jpg".format(imgname)))
-        vis_fp(img, [fp2_gt, fp3_gt], wp_gt, hm_gt, center, scale, cad.__dict__, "plot/{}-gt.jpg".format(id))
         vis_fp(img, [fp2, fp3], wp, hm, center, scale, cad.__dict__, "plot/{}.jpg".format(id))
         csvfile.flush()
 
@@ -168,12 +194,17 @@ with tf.Session() as sess:
             continue
 
         print(i["index"])
+
         i = sess.run(loader.make_input_and_labels({k:tf.convert_to_tensor(v) for k,v in i.items() }))
+
+        hm_pre_count = np.sum(np.max(np.max(i["labels"], axis=0), axis=0) > 0)
+        if hm_pre_count < 4:
+            continue
         res, = sess.run(out1, {
             input: np.expand_dims(i["input"], axis=0)
         })
         try:
             p(i["index"], i["labels"], res)
-        except:
-            pass
-        pass
+        except Exception as e:
+            print(e)
+
