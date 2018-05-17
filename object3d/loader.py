@@ -79,6 +79,22 @@ def _draw_gaussian(pos, center, scale, sigma):
     return X
 
 
+def make_input_fullpath(annot):
+    image_path = annot["image"]
+    center = tf.to_float(annot["center"])
+    scale = tf.to_float(annot["scale"]) / 1.28  # 1.28 is 256/200, original paper impl.'s flaw
+
+    image_string = tf.read_file(image_path)
+    image_decoded = tf.cast(tf.image.decode_image(image_string, channels=3), tf.float32) / 255.0
+    image_decoded.set_shape([None, None, 3])  # decode_image doesn't set channels correctly
+
+    image_cropped = _crop(image_decoded, center, scale)
+
+    result = annot.copy()
+    result["input"] = image_cropped
+    return result
+
+
 def make_input(annot):
     filename = annot["image"]
     image_path = tf.string_join([opts.data_dir, "pascal3d", "images", filename], separator="/")
