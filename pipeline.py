@@ -46,9 +46,6 @@ def process():
                     "nonzeros",
                     "score sum",
                     "score > 0.1",
-                    "hm_gt_wp_reproj_err",
-                    "hm_gt_fp2_reproj_err",
-                    "hm_gt_fp3_reproj_err",
 
                     "hm_wp_reproj_err",
                     "hm_fp2_reproj_err",
@@ -99,38 +96,50 @@ def process():
             return reproj_err(W, transformHG(p, center, scale, hm.shape[1:], False), score)
 
         mirrors = [ np.array([
-            [0, 1, 0],
             [-1, 0, 0],
+            [0, 1, 0],
             [0, 0, 1]
         ]), np.array([
             [1, 0, 0],
-            [0, 0, 1],
-            [0, -1, 0]
+            [0, -1, 0],
+            [0, 0, 1]
         ]), np.array([
-            [0, 0, -1],
+            [1, 0, 0],
             [0, 1, 0],
-            [1, 0, 0]
+            [0, 0, -1]
+        ]), np.array([
+            [-1, 0, 0],
+            [0, -1, 0],
+            [0, 0, 1]
+        ]), np.array([
+            [-1, 0, 0],
+            [0, 1, 0],
+            [0, 0, -1]
+        ]), np.array([
+            [1, 0, 0],
+            [0, -1, 0],
+            [0, 0, -1]
         ])]
 
         W_im = transformHG(W_hp, center, scale, hm.shape[1:], True)
 
         wp = PoseFromKpts_WP(W_hp + 1, d, weight=score, verb=False, lam=1)
         fp2 = PoseFromKpts_FP_estim_K_using_WP(W_im, d, wp, score, center, scale, hm.shape[1])
-        fp2_err = reproj_fp(W_hp_gt, fp2, fp2["K"], score_gt)
+        fp2_err = reproj_fp(W_hp, fp2, fp2["K"], score)
         for mirror in mirrors:
             wp_alt = wp.copy()
             wp_alt["R"] = wp["R"] @ mirror
             a = PoseFromKpts_FP_estim_K_using_WP(W_im, d, wp_alt, score, center, scale, hm.shape[1])
-            err = reproj_fp(W_hp_gt, a, a["K"], score_gt)
+            err = reproj_fp(W_hp, a, a["K"], score)
             if err < fp2_err:
                 fp2 = a
                 fp2_err = err
 
         fp3 = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=wp["R"], weight=score, verb=False)
-        fp3_err = reproj_fp(W_hp_gt, fp3, fp3["K"], score_gt)
+        fp3_err = reproj_fp(W_hp, fp3, fp3["K"], score)
         for mirror in mirrors:
             a = PoseFromKpts_FP_estim_K_solely(W_im, d, r0=wp["R"] @ mirror, weight=score, verb=False)
-            err = reproj_fp(W_hp_gt, a, a["K"], score_gt)
+            err = reproj_fp(W_hp, a, a["K"], score)
             if err < fp3_err:
                 fp3 = a
                 fp3_err = err
@@ -144,12 +153,12 @@ def process():
             "hm_err": reproj_err(W_hp_gt, W_hp, score_gt),
 
             "hm_wp_reproj_err":  reproj_err(W_hp, (wp["R"] @ wp["S"])[0:2] + wp["T"], score),
-            "hm_fp2_reproj_err": reproj_fp(W_hp, fp2, fp2["K"], score),
-            "hm_fp3_reproj_err": reproj_fp(W_hp, fp3, fp3["K"], score),
+            "hm_fp2_reproj_err": fp2_err,
+            "hm_fp3_reproj_err": fp3_err,
 
             "hm_wp_reproj_err_to_gt":  reproj_err(W_hp_gt, (wp["R"] @ wp["S"])[0:2] + wp["T"], score_gt),
-            "hm_fp2_reproj_err_to_gt": fp2_err,
-            "hm_fp3_reproj_err_to_gt": fp3_err,
+            "hm_fp2_reproj_err_to_gt": reproj_fp(W_hp_gt, fp2, fp2["K"], score_gt),
+            "hm_fp3_reproj_err_to_gt": reproj_fp(W_hp_gt, fp3, fp3["K"], score_gt),
         })
 
         img = imread(path.join(datapath, "../images/{}.jpg".format(imgname)))
