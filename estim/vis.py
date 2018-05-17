@@ -43,7 +43,10 @@ def fullShape(S1, model, kpt2fit=None):
 
     S2 = np.zeros([3, len(kpt2fit)])
     for i in range(len(kpt2fit)):
-        xyz = model[model["pnames"][kpt2fit[i]]]
+        kpt_name = model["pnames"][kpt2fit[i]]
+        xyz = model[kpt_name]
+        if xyz.shape == (0,) and kpt_name == "head_top": # there's missing keypoints in dataset
+            xyz = (model["head_right_top"] + model["head_right_top"])/2
         S2[:, i] = xyz.T
 
     eps = np.finfo(float).eps

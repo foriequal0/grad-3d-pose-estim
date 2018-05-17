@@ -44,6 +44,8 @@ def process():
         csvfile,
         fieldnames=["id", "class", "hm_err",
                     "nonzeros",
+                    "score sum",
+                    "score > 0.1",
                     "hm_gt_wp_reproj_err",
                     "hm_gt_fp2_reproj_err",
                     "hm_gt_fp3_reproj_err",
@@ -97,18 +99,6 @@ def process():
             return reproj_err(W, transformHG(p, center, scale, hm.shape[1:], False), score)
 
         mirrors = [ np.array([
-            [-1, 0, 0],
-            [0, 1, 0],
-            [0, 0, 1],
-        ]), np.array([
-            [1, 0, 0],
-            [0, -1, 0],
-            [0, 0, 1],
-        ]), np.array([
-            [1, 0, 0],
-            [0, 1, 0],
-            [0, 0, -1]
-        ]), np.array([
             [0, 1, 0],
             [-1, 0, 0],
             [0, 0, 1]
@@ -149,6 +139,8 @@ def process():
             "id": id,
             "class": clazz,
             "nonzeros": np.sum(score_gt),
+            "score sum": np.sum(score),
+            "score > 0.1": np.sum(score > 0.1),
             "hm_err": reproj_err(W_hp_gt, W_hp, score_gt),
 
             "hm_wp_reproj_err":  reproj_err(W_hp, (wp["R"] @ wp["S"])[0:2] + wp["T"], score),
@@ -157,7 +149,7 @@ def process():
 
             "hm_wp_reproj_err_to_gt":  reproj_err(W_hp_gt, (wp["R"] @ wp["S"])[0:2] + wp["T"], score_gt),
             "hm_fp2_reproj_err_to_gt": fp2_err,
-            "hm_fp3_reproj_err_to_gt": fp3_err
+            "hm_fp3_reproj_err_to_gt": fp3_err,
         })
 
         img = imread(path.join(datapath, "../images/{}.jpg".format(imgname)))
