@@ -20,22 +20,22 @@ import object3d.loader as loader
 from object3d.opts import opts
 
 import numpy as np
+import pathlib
+from imageio import imread
+from estim.util import load, findWmax
+from estim.vis import transformHG, vis_fp
+from estim.core import PoseFromKpts_WP, PoseFromKpts_FP_estim_K_using_WP, PoseFromKpts_FP_estim_K_solely
+from object3d.opts import opts
+import csv
+
+datapath = path.join(opts.data_dir, "pascal3d/annot")
+predpath = 'exp/pascal3d/'
+
+annotfile = path.join(datapath, "valid.mat")
+annotmat = load(annotfile)
+annot = annotmat["annot"]
 
 def process():
-    import pathlib
-    from imageio import imread
-    from estim.util import load, findWmax
-    from estim.vis import transformHG,  vis_fp
-    from estim.core import PoseFromKpts_WP,  PoseFromKpts_FP_estim_K_using_WP, PoseFromKpts_FP_estim_K_solely
-    from object3d.opts import opts
-    import csv
-
-    datapath = path.join(opts.data_dir, "pascal3d/annot")
-    predpath = 'exp/pascal3d/'
-
-    annotfile = path.join(datapath, "valid.mat")
-    annotmat = load(annotfile)
-    annot = annotmat["annot"]
 
     pathlib.Path("plot").mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +55,7 @@ def process():
                     "hm_fp2_reproj_err_to_gt",
                     "hm_fp3_reproj_err_to_gt",
                     ])
+    csvwriter.writerow({k:k for k in csvwriter.fieldnames})
 
     def do(id, hm_gt, hm):
         idx = id - 1
