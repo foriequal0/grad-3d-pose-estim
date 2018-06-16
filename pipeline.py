@@ -167,7 +167,7 @@ def process():
 
     return do
 
-def load(label):
+def load_dataset(label):
     names_filename = path.join(opts.data_dir, "pascal3d", "annot",
                                "{}_images.txt".format(label))
 
@@ -193,28 +193,40 @@ def load(label):
 
 input = tf.placeholder(tf.float32, (None, 256, 256, 3))
 out1, out2 = model.stacked_hourglass(input, 102, False)
-
+annot_placeholder = {
+    "image": tf.placeholder(tf.string),
+    "index": tf.placeholder(tf.float32),
+    "part": tf.placeholder(tf.float32),
+    "scale": tf.placeholder(tf.float32),
+    "center": tf.placeholder(tf.float32),
+}
+input_maker = loader.make_input_and_labels(annot_placeholder)
 with tf.Session() as sess:
     saver = tf.train.Saver()
     checkpoint = tf.train.latest_checkpoint("./model/default")
     saver.restore(sess, checkpoint)
 
     p = process()
-
-    for i in load("valid"):
-        if i["index"] % 10 != 0:
+    count = 0
+    pathlib.Path("intermediate").mkdir(parents=True, exist_ok=True)
+    for i in load_dataset("valid"):
+        if i["index"] % 5 != 0:
+            continue
+        if annot.occluded[i["index"]-1] or annot.truncated[i["index"]-1]:
             continue
 
         print(i["index"])
+        saved = "intermediate/{}.npy".format(i["index"])
 
-        i = sess.run(loader.make_input_and_labels({k:tf.convert_to_tensor(v) for k,v in i.items() }))
+        try:
+            i, res = np.load(saved)
+        except:
+            i = sess.run(input_maker, {annot_placeholder[k]:v for k,v in i.items()})
+            res, = sess.run(out1, {
+                input: np.expand_dims(i["input"], axis=0)
+            })
+            np.save(saved, [i, res])
 
-        hm_pre_count = np.sum(np.max(np.max(i["labels"], axis=0), axis=0) > 0)
-        # if hm_pre_count < 4:
-        #     continue
-        res, = sess.run(out1, {
-            input: np.expand_dims(i["input"], axis=0)
-        })
         try:
             p(i["index"], i["labels"], res)
         except Exception as e:
