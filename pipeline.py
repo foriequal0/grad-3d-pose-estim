@@ -58,6 +58,7 @@ def process():
     csvwriter.writerow({k:k for k in csvwriter.fieldnames})
 
     def do(id, hm_gt, hm):
+        id = int(id)
         idx = id - 1
         imgname = annot.imgname[idx]
         center = annot.center[idx]
@@ -190,7 +191,6 @@ def load_dataset(label):
             "center": annot["center"][i],
             "scale": annot["scale"][i]
         }
-
 
 input = tf.placeholder(tf.float32, (None, 256, 256, 3))
 out1, out2 = model.stacked_hourglass(input, 102, False)

@@ -338,9 +338,9 @@ def PoseFromKpts_FP_estim_K_using_WP(W_im, dict, output_wp, score, center, scale
     dx0 = 320.0
     dy0 = 240.0
     f, dx, dy = linesearch(lambda x: foverr(x[0], x[1:3]),
-                           np.array([f0, dx0, dy0]), 10.0,
+                           np.array([f0, dx0, dy0]),  100.0,
                            np.array([10, 0, 0]),
-                           np.array([10000, 1000, 1000]),
+                           np.array([100000, 1000, 1000]),
                            100)
 
     K = np.array([
@@ -381,8 +381,8 @@ def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=
     def foverr(f, di):
         t0 = np.mean(W_im, 1) - di
         r = rotationMatrix(np.array([0,0,f]), np.array([t0[0], t0[1], f]))
-        rRS = r.T@RS
-        k0 = f * estimSize(rRS[0:2]) / estimSize(W_im)
+        rRS = r@RS
+        k0 = f * estimSize(RS[0:2]) / estimSize(W_im)
         def err(t, k):
             p = (rRS[0:2] + np.expand_dims(t, 1) / f * k) / (rRS[2] + k) + np.expand_dims(di, 1)
             return np.sum(((centralize_points(W_im, weight) - centralize_points(p, weight)) ** 2) * weight)
@@ -393,9 +393,9 @@ def PoseFromKpts_FP_estim_K_solely(W_im, dict, lam=1, tol=1e-3, weight=None, r0=
     dx0 = 320.0
     dy0 = 240.0
     f, dx, dy = linesearch(lambda x: foverr(x[0], x[1:3]),
-                           np.array([f0, dx0, dy0]), 10.0,
+                           np.array([f0, dx0, dy0]), 100.0,
                            np.array([10, 0, 0]),
-                           np.array([10000, 1000, 1000]),
+                           np.array([100000, 1000, 1000]),
                            100)
 
     K = np.array([
